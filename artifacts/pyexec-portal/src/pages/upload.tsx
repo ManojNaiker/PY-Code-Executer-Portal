@@ -123,7 +123,7 @@ export default function Upload() {
             <CardContent className="space-y-6">
               
               <div className="space-y-2">
-                <FormLabel className={fileError ? "text-destructive" : ""}>Python File *</FormLabel>
+                <label className={`text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 ${fileError ? "text-destructive" : ""}`}>Python File *</label>
                 <div className={`border-2 border-dashed rounded-lg p-6 text-center ${fileError ? 'border-destructive bg-destructive/5' : 'border-muted-foreground/25 hover:bg-muted/50'} transition-colors relative`}>
                   <input
                     type="file"
