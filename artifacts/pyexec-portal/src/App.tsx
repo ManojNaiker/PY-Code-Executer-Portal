@@ -47,48 +47,133 @@ const clerkAppearance = {
     logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
   },
   variables: {
-    colorPrimary: "hsl(217, 91%, 60%)",
-    colorBackground: "hsl(222, 47%, 11%)",
-    colorInputBackground: "hsl(215, 28%, 22%)",
-    colorText: "hsl(210, 40%, 98%)",
-    colorTextSecondary: "hsl(215, 20%, 65%)",
-    colorInputText: "hsl(210, 40%, 98%)",
-    colorNeutral: "hsl(215, 28%, 22%)",
-    borderRadius: "0.25rem",
-    fontFamily: "'Inter', sans-serif",
-    fontFamilyButtons: "'Inter', sans-serif",
+    colorPrimary: "#0078d4",
+    colorBackground: "#ffffff",
+    colorInputBackground: "#f8f9fa",
+    colorText: "#1a1a1a",
+    colorTextSecondary: "#5e5e5e",
+    colorInputText: "#1a1a1a",
+    colorNeutral: "#d1d5db",
+    borderRadius: "0rem",
+    fontFamily: "'Segoe UI', 'Inter', sans-serif",
+    fontFamilyButtons: "'Segoe UI', 'Inter', sans-serif",
+    fontSize: "14px",
   },
   elements: {
     rootBox: "w-full",
-    cardBox: "border border-[hsl(215,28%,22%)] shadow-xl rounded-lg w-full overflow-hidden",
+    cardBox: "border-0 shadow-none rounded-none w-full overflow-hidden",
     card: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    footer: "!shadow-none !border-0 !bg-transparent !rounded-none border-t border-[hsl(215,28%,22%)]",
-    headerTitle: { color: "hsl(210, 40%, 98%)" },
-    headerSubtitle: { color: "hsl(215, 20%, 65%)" },
-    socialButtonsBlockButtonText: { color: "hsl(210, 40%, 98%)" },
-    formFieldLabel: { color: "hsl(210, 40%, 98%)" },
-    footerActionLink: { color: "hsl(217, 91%, 60%)" },
-    footerActionText: { color: "hsl(215, 20%, 65%)" },
-    dividerText: { color: "hsl(215, 20%, 65%)" },
-    identityPreviewEditButton: { color: "hsl(217, 91%, 60%)" },
-    formFieldSuccessText: { color: "hsl(210, 40%, 98%)" },
-    alertText: { color: "hsl(210, 40%, 98%)" },
+    footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
+    headerTitle: { color: "#1a1a1a", fontWeight: "600", fontSize: "20px" },
+    headerSubtitle: { color: "#5e5e5e", fontSize: "13px" },
+    socialButtonsBlockButtonText: { color: "#1a1a1a" },
+    formFieldLabel: { color: "#1a1a1a", fontWeight: "500", fontSize: "13px" },
+    footerActionLink: { color: "#0078d4" },
+    footerActionText: { color: "#5e5e5e" },
+    dividerText: { color: "#5e5e5e" },
+    identityPreviewEditButton: { color: "#0078d4" },
+    formFieldSuccessText: { color: "#107c10" },
+    alertText: { color: "#d13438" },
+    formButtonPrimary: "!bg-[#0078d4] hover:!bg-[#106ebe] !rounded-sm !font-normal",
+    formFieldInput: "!rounded-sm !border-[#d1d5db] focus:!border-[#0078d4] !bg-white",
+    logoBox: "!justify-start",
+    logoImage: "!h-8",
   },
 };
 
-function SignInPage() {
+function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: string }) {
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+    <div className="flex min-h-[100dvh] bg-white" style={{ fontFamily: "'Segoe UI', Inter, sans-serif" }}>
+      {/* Left panel — branding */}
+      <div className="hidden lg:flex lg:w-[45%] bg-[#0f1e3c] flex-col justify-between p-12 relative overflow-hidden">
+        {/* Background pattern */}
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-0 left-0 w-64 h-64 bg-blue-400 rounded-full -translate-x-1/2 -translate-y-1/2" />
+          <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-600 rounded-full translate-x-1/4 translate-y-1/4" />
+        </div>
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-12">
+            <div className="w-10 h-10 bg-[#0078d4] rounded-sm flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white">
+                <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 2h2v2h2v-2h2v2h-2v2h2v2h-2v-2h-2v2h-2v-2h2v-2h-2v-2z"/>
+              </svg>
+            </div>
+            <div>
+              <div className="text-white font-semibold text-lg leading-tight">PyExec Portal</div>
+              <div className="text-blue-300 text-xs">Enterprise Platform</div>
+            </div>
+          </div>
+
+          <h1 className="text-white text-3xl font-semibold leading-tight mb-4">
+            Secure Python<br />Execution Platform
+          </h1>
+          <p className="text-blue-200 text-sm leading-relaxed mb-10">
+            Run Python scripts securely from your browser.<br />
+            Department-based access control and full audit trail.
+          </p>
+
+          <div className="space-y-5">
+            {[
+              { icon: "🔒", label: "Role-based access control" },
+              { icon: "🏢", label: "Department-level script isolation" },
+              { icon: "📋", label: "Complete audit logging" },
+              { icon: "⚡", label: "Instant browser execution" },
+            ].map(f => (
+              <div key={f.label} className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-[#0078d4]/20 rounded-sm flex items-center justify-center text-sm">{f.icon}</div>
+                <span className="text-blue-100 text-sm">{f.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative z-10 text-blue-400 text-xs">
+          © {new Date().getFullYear()} PyExec Portal. Enterprise Edition.
+        </div>
+      </div>
+
+      {/* Right panel — login form */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 bg-white">
+        <div className="w-full max-w-[380px]">
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 bg-[#0078d4] rounded-sm flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white">
+                <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 2h2v2h2v-2h2v2h-2v2h2v2h-2v-2h-2v2h-2v-2h2v-2h-2v-2z"/>
+              </svg>
+            </div>
+            <span className="font-semibold text-[#0f1e3c]">PyExec Portal</span>
+          </div>
+
+          {children}
+
+          <div className="mt-8 pt-6 border-t border-gray-100 text-center text-xs text-gray-400">
+            By signing in, you agree to our Terms of Service.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-function SignUpPage() {
+function SignInPage() {
+  // To update login providers, app branding, or OAuth settings use the Auth
+  // pane in the workspace toolbar. More information can be found in the Replit docs.
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
+    <AuthPageLayout title="Sign in" subtitle="Use your corporate account">
+      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+    </AuthPageLayout>
+  );
+}
+
+function SignUpPage() {
+  // To update login providers, app branding, or OAuth settings use the Auth
+  // pane in the workspace toolbar. More information can be found in the Replit docs.
+  return (
+    <AuthPageLayout title="Create account" subtitle="Register for access">
       <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
-    </div>
+    </AuthPageLayout>
   );
 }
 
