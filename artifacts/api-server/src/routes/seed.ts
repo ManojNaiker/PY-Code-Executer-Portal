@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createClerkClient } from "@clerk/backend";
+import bcrypt from "bcryptjs";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -22,17 +23,23 @@ export async function seedAdminUser() {
   try {
     const clerkClient = createClerkClient({ secretKey });
 
-    // Check if already exists in our DB
     const existing = await db.query.usersTable.findFirst({
       where: eq(usersTable.email, ADMIN_EMAIL),
     });
 
     if (existing) {
+      // Update password hash if missing
+      if (!existing.passwordHash) {
+        const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+        await db.update(usersTable)
+          .set({ passwordHash })
+          .where(eq(usersTable.email, ADMIN_EMAIL));
+        logger.info("Admin password hash updated");
+      }
       logger.info("Admin user already exists, skipping seed");
       return;
     }
 
-    // Check if exists in Clerk
     let clerkUserId: string | null = null;
     try {
       const { data: users } = await clerkClient.users.getUserList({
@@ -47,7 +54,6 @@ export async function seedAdminUser() {
       logger.warn({ err }, "Error checking Clerk for admin user");
     }
 
-    // Create in Clerk if not exists
     if (!clerkUserId) {
       try {
         const clerkUser = await clerkClient.users.createUser({
@@ -65,16 +71,18 @@ export async function seedAdminUser() {
       }
     }
 
-    // Create in our DB as admin
+    const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+
     await db.insert(usersTable).values({
       clerkId: clerkUserId,
       email: ADMIN_EMAIL,
       firstName: ADMIN_FIRST_NAME,
       lastName: ADMIN_LAST_NAME,
       role: "admin",
+      passwordHash,
     }).onConflictDoUpdate({
       target: usersTable.clerkId,
-      set: { role: "admin", email: ADMIN_EMAIL },
+      set: { role: "admin", email: ADMIN_EMAIL, passwordHash },
     });
 
     logger.info("Admin user seeded successfully");

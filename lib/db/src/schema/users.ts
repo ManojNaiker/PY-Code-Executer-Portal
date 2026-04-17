@@ -11,6 +11,7 @@ export const usersTable = pgTable("users", {
   lastName: text("last_name"),
   role: text("role").notNull().default("user"),
   departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
+  passwordHash: text("password_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

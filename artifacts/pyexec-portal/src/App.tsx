@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk } from '@clerk/react';
+import { useEffect, useRef, useState } from "react";
+import { ClerkProvider, SignUp, Show, useClerk, useSignIn } from '@clerk/react';
 import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from 'wouter';
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -40,53 +40,10 @@ if (!clerkPubKey) {
   throw new Error('Missing VITE_CLERK_PUBLISHABLE_KEY in .env file');
 }
 
-const clerkAppearance = {
-  options: {
-    logoPlacement: "inside" as const,
-    logoLinkUrl: basePath || "/",
-    logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
-  },
-  variables: {
-    colorPrimary: "#0078d4",
-    colorBackground: "#ffffff",
-    colorInputBackground: "#f8f9fa",
-    colorText: "#1a1a1a",
-    colorTextSecondary: "#5e5e5e",
-    colorInputText: "#1a1a1a",
-    colorNeutral: "#d1d5db",
-    borderRadius: "0rem",
-    fontFamily: "'Segoe UI', 'Inter', sans-serif",
-    fontFamilyButtons: "'Segoe UI', 'Inter', sans-serif",
-    fontSize: "14px",
-  },
-  elements: {
-    rootBox: "w-full",
-    cardBox: "border-0 shadow-none rounded-none w-full overflow-hidden",
-    card: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    headerTitle: { color: "#1a1a1a", fontWeight: "600", fontSize: "20px" },
-    headerSubtitle: { color: "#5e5e5e", fontSize: "13px" },
-    socialButtonsBlockButtonText: { color: "#1a1a1a" },
-    formFieldLabel: { color: "#1a1a1a", fontWeight: "500", fontSize: "13px" },
-    footerActionLink: { color: "#0078d4" },
-    footerActionText: { color: "#5e5e5e" },
-    dividerText: { color: "#5e5e5e" },
-    identityPreviewEditButton: { color: "#0078d4" },
-    formFieldSuccessText: { color: "#107c10" },
-    alertText: { color: "#d13438" },
-    formButtonPrimary: "!bg-[#0078d4] hover:!bg-[#106ebe] !rounded-sm !font-normal",
-    formFieldInput: "!rounded-sm !border-[#d1d5db] focus:!border-[#0078d4] !bg-white",
-    logoBox: "!justify-start",
-    logoImage: "!h-8",
-  },
-};
-
 function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: string }) {
   return (
     <div className="flex min-h-[100dvh] bg-white" style={{ fontFamily: "'Segoe UI', Inter, sans-serif" }}>
-      {/* Left panel — branding */}
       <div className="hidden lg:flex lg:w-[45%] bg-[#0f1e3c] flex-col justify-between p-12 relative overflow-hidden">
-        {/* Background pattern */}
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-0 left-0 w-64 h-64 bg-blue-400 rounded-full -translate-x-1/2 -translate-y-1/2" />
           <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-600 rounded-full translate-x-1/4 translate-y-1/4" />
@@ -133,10 +90,8 @@ function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNo
         </div>
       </div>
 
-      {/* Right panel — login form */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 bg-white">
         <div className="w-full max-w-[380px]">
-          {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-2 mb-8">
             <div className="w-8 h-8 bg-[#0078d4] rounded-sm flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white">
@@ -144,6 +99,11 @@ function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNo
               </svg>
             </div>
             <span className="font-semibold text-[#0f1e3c]">PyExec Portal</span>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold text-[#0f1e3c] mb-1">{title}</h2>
+            <p className="text-sm text-gray-500">{subtitle}</p>
           </div>
 
           {children}
@@ -158,11 +118,105 @@ function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNo
 }
 
 function SignInPage() {
-  // To update login providers, app branding, or OAuth settings use the Auth
-  // pane in the workspace toolbar. More information can be found in the Replit docs.
+  const { signIn, setActive, isLoaded } = useSignIn();
+  const [, setLocation] = useLocation();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isLoaded || !signIn) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Invalid email or password");
+        setLoading(false);
+        return;
+      }
+
+      const result = await signIn.create({
+        strategy: "ticket",
+        ticket: data.ticket,
+      });
+
+      if (result.status === "complete") {
+        await setActive({ session: result.createdSessionId });
+        setLocation("/dashboard");
+      } else {
+        setError("Sign in could not be completed. Please try again.");
+      }
+    } catch (err) {
+      setError("An error occurred. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <AuthPageLayout title="Sign in" subtitle="Use your corporate account">
-      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+    <AuthPageLayout title="Sign In" subtitle="Corporate access only">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-sm">
+            {error}
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Email address
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="Enter your email"
+            required
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Password
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Enter your password"
+            required
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-[#0078d4] hover:bg-[#106ebe] disabled:opacity-60 text-white font-normal py-2 px-4 rounded-sm text-sm transition-colors"
+        >
+          {loading ? "Signing in..." : "Sign in"}
+        </button>
+
+        <p className="text-center text-sm text-gray-500">
+          Don't have an account?{" "}
+          <a href={`${basePath}/sign-up`} className="text-[#0078d4] hover:underline">
+            Sign up
+          </a>
+        </p>
+      </form>
     </AuthPageLayout>
   );
 }
@@ -233,7 +287,6 @@ function ClerkProviderWithRoutes() {
     <ClerkProvider
       publishableKey={clerkPubKey}
       proxyUrl={clerkProxyUrl}
-      appearance={clerkAppearance}
       localization={{
         signIn: {
           start: {
@@ -252,7 +305,7 @@ function ClerkProviderWithRoutes() {
             <Route path="/" component={HomeRedirect} />
             <Route path="/sign-in/*?" component={SignInPage} />
             <Route path="/sign-up/*?" component={SignUpPage} />
-            
+
             <Route path="/dashboard">
               <AuthGuard><Dashboard /></AuthGuard>
             </Route>
@@ -265,7 +318,7 @@ function ClerkProviderWithRoutes() {
             <Route path="/upload">
               <AuthGuard><Upload /></AuthGuard>
             </Route>
-            
+
             <Route path="/admin/departments">
               <AuthGuard><AdminDepartments /></AuthGuard>
             </Route>
@@ -275,7 +328,7 @@ function ClerkProviderWithRoutes() {
             <Route path="/admin/audit">
               <AuthGuard><AdminAudit /></AuthGuard>
             </Route>
-            
+
             <Route component={NotFound} />
           </Switch>
           <Toaster />
@@ -286,7 +339,6 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
-  // Always dark mode for corporate aesthetic
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);

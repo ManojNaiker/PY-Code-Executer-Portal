@@ -3,10 +3,51 @@ import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
+import { createClerkClient } from "@clerk/backend";
+import bcrypt from "bcryptjs";
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 
 const router = Router();
+
+router.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    res.status(400).json({ error: "Email and password are required" });
+    return;
+  }
+
+  try {
+    const user = await db.query.usersTable.findFirst({
+      where: eq(usersTable.email, email.toLowerCase().trim()),
+    });
+
+    if (!user || !user.passwordHash || !user.clerkId) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    const secretKey = process.env.CLERK_SECRET_KEY!;
+    const clerkClient = createClerkClient({ secretKey });
+
+    const signInToken = await clerkClient.signInTokens.createSignInToken({
+      userId: user.clerkId,
+      expiresInSeconds: 300,
+    });
+
+    res.json({ ticket: signInToken.token });
+  } catch (err) {
+    req.log.error({ err }, "Login error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 router.post("/auth/sync", requireAuth, async (req, res) => {
   const auth = getAuth(req);
