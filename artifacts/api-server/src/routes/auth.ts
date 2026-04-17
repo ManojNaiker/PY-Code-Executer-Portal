@@ -42,7 +42,7 @@ router.post("/auth/login", async (req, res) => {
       expiresInSeconds: 300,
     });
 
-    res.json({ ticket: signInToken.token });
+    res.json({ ticket: signInToken.token, url: signInToken.url });
   } catch (err) {
     req.log.error({ err }, "Login error");
     res.status(500).json({ error: "Internal server error" });

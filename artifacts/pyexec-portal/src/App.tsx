@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ClerkProvider, SignUp, Show, useClerk, useSignIn } from '@clerk/react';
+import { ClerkProvider, SignUp, Show, useClerk } from '@clerk/react';
 import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from 'wouter';
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -16,19 +16,11 @@ import AdminAudit from "./pages/admin-audit";
 import NotFound from "./pages/not-found";
 import { Layout } from "./components/layout";
 import { useAuthSync } from "./hooks/use-auth-sync";
+import { queryClient } from "./lib/queryClient";
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
 
 function stripBase(path: string): string {
   return basePath && path.startsWith(basePath)
@@ -118,8 +110,7 @@ function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNo
 }
 
 function SignInPage() {
-  const { signIn, setActive, isLoaded } = useSignIn();
-  const [, setLocation] = useLocation();
+  const clerk = useClerk();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -127,7 +118,6 @@ function SignInPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isLoaded || !signIn) return;
     setLoading(true);
     setError("");
 
@@ -143,23 +133,31 @@ function SignInPage() {
 
       if (!response.ok) {
         setError(data.error || "Invalid email or password");
-        setLoading(false);
         return;
       }
 
-      const result = await signIn.create({
+      // Use clerk.client.signIn to create a session with the ticket
+      const signInResource = clerk.client?.signIn;
+      if (!signInResource) {
+        setError("Authentication not ready. Please refresh and try again.");
+        return;
+      }
+
+      const result = await signInResource.create({
         strategy: "ticket",
         ticket: data.ticket,
       });
 
       if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
-        setLocation("/dashboard");
+        await clerk.setActive({ session: result.createdSessionId });
+        // Hard redirect so Clerk session state is fully re-read
+        window.location.href = `${basePath}/dashboard`;
       } else {
-        setError("Sign in could not be completed. Please try again.");
+        setError(`Sign in incomplete (status: ${result.status}). Please try again.`);
       }
-    } catch (err) {
-      setError("An error occurred. Please try again.");
+    } catch (err: any) {
+      const msg = err?.errors?.[0]?.longMessage || err?.message || "An error occurred. Please try again.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
