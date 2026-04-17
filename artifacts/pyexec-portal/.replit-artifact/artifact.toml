@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "PyExec Portal"
+version = "1.0.0"
+id = "artifacts/pyexec-portal"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22296
+
+[services.development]
+run = "pnpm --filter @workspace/pyexec-portal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/pyexec-portal", "run", "build" ]
+publicDir = "artifacts/pyexec-portal/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22296"
+BASE_PATH = "/"
