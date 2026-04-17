@@ -8,7 +8,7 @@ import { logger } from "../lib/logger";
 const router = Router();
 
 const ADMIN_EMAIL = "admin@pyexec.com";
-const ADMIN_PASSWORD = "PyExec@Admin#2024!";
+const ADMIN_PASSWORD = "admin@123";
 const ADMIN_FIRST_NAME = "System";
 const ADMIN_LAST_NAME = "Admin";
 
