@@ -151,7 +151,14 @@ function pipInstall(pkg: string, log?: (msg: string) => void): Promise<void> {
       "--disable-pip-version-check",
       "--quiet",
       pkg,
-    ], { timeout: 120000 });
+    ], {
+      timeout: 180000,
+      env: {
+        ...process.env,
+        PIP_USER: "0",
+        PIP_REQUIRE_VIRTUALENV: "0",
+      },
+    });
     let stderr = "";
     proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
     proc.on("close", (code: number | null) => {

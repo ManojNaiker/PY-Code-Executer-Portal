@@ -58,6 +58,12 @@ type ExecResult = {
   stderr: string;
   exitCode: number;
   executionTimeMs: number;
+  deps?: {
+    attempted: string[];
+    installed: string[];
+    failed: { pkg: string; error: string }[];
+    log?: string;
+  };
 };
 
 interface Props {
@@ -404,6 +410,25 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                   placeholder="Type the value(s) the script will read..."
                   className="font-mono text-sm min-h-[80px]"
                 />
+              </div>
+            )}
+          </div>
+        )}
+
+        {result?.deps && (result.deps.installed.length > 0 || result.deps.failed.length > 0) && (
+          <div className="rounded-md border border-blue-500/40 bg-blue-500/5 p-3 text-xs space-y-1">
+            <div className="font-semibold text-blue-600 dark:text-blue-400">Dependency installation</div>
+            {result.deps.installed.length > 0 && (
+              <div>Installed: <span className="font-mono">{result.deps.installed.join(", ")}</span></div>
+            )}
+            {result.deps.failed.length > 0 && (
+              <div className="text-destructive">
+                Failed: {result.deps.failed.map((f) => (
+                  <div key={f.pkg} className="mt-1">
+                    <span className="font-mono font-semibold">{f.pkg}</span>
+                    <pre className="whitespace-pre-wrap text-[10px] opacity-80 mt-0.5">{f.error.slice(0, 400)}</pre>
+                  </div>
+                ))}
               </div>
             )}
           </div>
