@@ -9,10 +9,17 @@ import { spawn } from "child_process";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
+import multer from "multer";
+import { parseScriptInputs } from "../lib/scriptParser";
 
 const router = Router();
 
-async function runPython(code: string, args: string[] = [], stdin?: string | null): Promise<{
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+async function runPython(code: string, args: string[] = [], stdin?: string | null, fileBuffer?: Buffer | null, fileName?: string | null): Promise<{
   success: boolean;
   stdout: string;
   stderr: string;
@@ -23,10 +30,18 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
   const scriptPath = path.join(tmpDir, "script.py");
   await fs.writeFile(scriptPath, code, "utf-8");
 
+  let finalArgs = [...args];
+  if (fileBuffer && fileName) {
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = path.join(tmpDir, safeName);
+    await fs.writeFile(filePath, fileBuffer);
+    finalArgs.push(filePath);
+  }
+
   const start = Date.now();
   return new Promise((resolve) => {
-    const proc = spawn("python3", [scriptPath, ...args], {
-      timeout: 30000,
+    const proc = spawn("python3", [scriptPath, ...finalArgs], {
+      timeout: 60000,
       env: {
         PATH: process.env.PATH,
         HOME: os.tmpdir(),
@@ -74,7 +89,32 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
   });
 }
 
-router.post("/scripts/:id/execute", requireAuth, async (req, res) => {
+router.get("/scripts/:id/inputs", requireAuth, async (req, res) => {
+  const auth = getAuth(req);
+  const userId = auth.userId!;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!me) return res.status(401).json({ error: "User not found" });
+
+    const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    if (!script) return res.status(404).json({ error: "Script not found" });
+
+    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const schema = parseScriptInputs(script.code);
+    res.json(schema);
+  } catch (err) {
+    req.log.error({ err }, "Error parsing script inputs");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (req, res) => {
   const auth = getAuth(req);
   const userId = auth.userId!;
   const id = parseInt(req.params.id);
@@ -92,11 +132,30 @@ router.post("/scripts/:id/execute", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const { args = [], stdin } = req.body || {};
+    let args: string[] = [];
+    let stdin: string | null | undefined = undefined;
+    const file = (req as any).file as { buffer: Buffer; originalname: string } | undefined;
 
-    await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name } });
+    if (file) {
+      const rawArgs = (req.body?.args ?? "[]");
+      try { args = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs; }
+      catch { args = []; }
+      stdin = req.body?.stdin || null;
+    } else {
+      args = req.body?.args ?? [];
+      stdin = req.body?.stdin ?? null;
+    }
+    if (!Array.isArray(args)) args = [];
 
-    const result = await runPython(script.code, args, stdin);
+    await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name, hasFile: !!file } });
+
+    const result = await runPython(
+      script.code,
+      args.map(String),
+      stdin,
+      file?.buffer ?? null,
+      file?.originalname ?? null,
+    );
 
     const [execution] = await db.insert(executionsTable).values({
       scriptId: id,

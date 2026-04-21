@@ -21,11 +21,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useUser } from "@clerk/react";
 import { useGetMyProfile, getGetMyProfileQueryKey } from "@workspace/api-client-react";
+import { useState } from "react";
+import { RunScriptDialog } from "@/components/run-script-dialog";
 
 export default function ScriptsList() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useUser();
+  const [runTarget, setRunTarget] = useState<{ id: number; name: string } | null>(null);
 
   const { data: profile } = useGetMyProfile({
     query: {
@@ -113,10 +116,16 @@ export default function ScriptsList() {
                 </p>
               </CardContent>
               <CardFooter className="flex justify-between gap-2 border-t bg-muted/20 p-4">
-                <Button className="w-full" asChild>
+                <Button
+                  className="w-full"
+                  onClick={() => setRunTarget({ id: script.id, name: script.name })}
+                >
+                  <Play className="mr-2 h-4 w-4" />
+                  Run
+                </Button>
+                <Button variant="outline" size="icon" asChild title="View details">
                   <Link href={`/scripts/${script.id}`}>
-                    <Play className="mr-2 h-4 w-4" />
-                    Run
+                    <FileCode2 className="h-4 w-4" />
                   </Link>
                 </Button>
                 {isAdmin && (
@@ -149,6 +158,15 @@ export default function ScriptsList() {
             </Card>
           ))}
         </div>
+      )}
+
+      {runTarget && (
+        <RunScriptDialog
+          scriptId={runTarget.id}
+          scriptName={runTarget.name}
+          open={!!runTarget}
+          onOpenChange={(o) => { if (!o) setRunTarget(null); }}
+        />
       )}
     </div>
   );
