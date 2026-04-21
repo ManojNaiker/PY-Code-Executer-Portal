@@ -55,6 +55,8 @@ interface Props {
   scriptName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialResult?: ExecResult | null;
+  initialSchema?: InputsSchema | null;
 }
 
 const ACCEPT_BY_KIND: Record<string, string> = {
@@ -64,16 +66,15 @@ const ACCEPT_BY_KIND: Record<string, string> = {
   text: "*",
 };
 
-export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange }: Props) {
+export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, initialResult, initialSchema }: Props) {
   const { toast } = useToast();
-  const [schema, setSchema] = useState<InputsSchema | null>(null);
+  const [schema, setSchema] = useState<InputsSchema | null>(initialSchema ?? null);
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [stdin, setStdin] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ExecResult | null>(null);
-  const [autoRunTried, setAutoRunTried] = useState(false);
+  const [result, setResult] = useState<ExecResult | null>(initialResult ?? null);
 
   useEffect(() => {
     if (!open) {
@@ -82,7 +83,18 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange }: Pr
       setStdin("");
       setFile(null);
       setResult(null);
-      setAutoRunTried(false);
+      return;
+    }
+    if (initialResult) setResult(initialResult);
+    if (initialSchema) {
+      setSchema(initialSchema);
+      const init: Record<string, string> = {};
+      for (const a of initialSchema.args) {
+        if (a.default != null) init[a.name] = a.default;
+        else if (a.type === "bool") init[a.name] = "false";
+        else init[a.name] = "";
+      }
+      setValues(init);
       return;
     }
     setLoadingSchema(true);
@@ -103,7 +115,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange }: Pr
         setSchema({ args: [], needsStdin: false, stdinPrompt: null, file: null });
       })
       .finally(() => setLoadingSchema(false));
-  }, [open, scriptId]);
+  }, [open, scriptId, initialResult, initialSchema]);
 
   const hasInputs = !!schema && (schema.args.length > 0 || schema.needsStdin || schema.file != null);
 
@@ -165,15 +177,6 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange }: Pr
     }
   }
 
-  // Auto-run when there are no inputs needed
-  useEffect(() => {
-    if (!open || !schema || autoRunTried || loadingSchema) return;
-    if (!hasInputs) {
-      setAutoRunTried(true);
-      executeNow();
-    }
-  }, [open, schema, hasInputs, autoRunTried, loadingSchema]);
-
   function validate(): string | null {
     if (!schema) return "Loading...";
     for (const a of schema.args) {
@@ -209,7 +212,9 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange }: Pr
               ? "Detecting required inputs..."
               : hasInputs
                 ? "Provide the required inputs below, then click Execute."
-                : "No inputs needed — running now..."}
+                : result
+                  ? "Execution result:"
+                  : "Ready to run."}
           </DialogDescription>
         </DialogHeader>
 

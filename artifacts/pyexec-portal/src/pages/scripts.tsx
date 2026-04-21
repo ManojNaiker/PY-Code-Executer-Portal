@@ -28,7 +28,57 @@ export default function ScriptsList() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useUser();
-  const [runTarget, setRunTarget] = useState<{ id: number; name: string } | null>(null);
+  const [runTarget, setRunTarget] = useState<{
+    id: number;
+    name: string;
+    initialResult?: any;
+    initialSchema?: any;
+  } | null>(null);
+  const [pendingId, setPendingId] = useState<number | null>(null);
+
+  async function handleRun(script: { id: number; name: string }) {
+    setPendingId(script.id);
+    try {
+      const r = await fetch(`/api/scripts/${script.id}/inputs`, { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const schema = await r.json();
+      const hasInputs =
+        schema.args.length > 0 || schema.needsStdin || schema.file != null;
+
+      if (hasInputs) {
+        setRunTarget({ id: script.id, name: script.name, initialSchema: schema });
+        return;
+      }
+      // No inputs needed → execute immediately, then show result-only dialog
+      const exec = await fetch(`/api/scripts/${script.id}/execute`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: [], stdin: null }),
+      });
+      if (!exec.ok) throw new Error(`HTTP ${exec.status}`);
+      const result = await exec.json();
+      toast({
+        title: result.success ? "Execution completed" : "Execution failed",
+        description: result.success ? undefined : `Exit code ${result.exitCode}`,
+        variant: result.success ? "default" : "destructive",
+      });
+      setRunTarget({
+        id: script.id,
+        name: script.name,
+        initialResult: result,
+        initialSchema: schema,
+      });
+    } catch (e) {
+      toast({
+        title: "Failed to run script",
+        description: String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setPendingId(null);
+    }
+  }
 
   const { data: profile } = useGetMyProfile({
     query: {
@@ -118,10 +168,11 @@ export default function ScriptsList() {
               <CardFooter className="flex justify-between gap-2 border-t bg-muted/20 p-4">
                 <Button
                   className="w-full"
-                  onClick={() => setRunTarget({ id: script.id, name: script.name })}
+                  onClick={() => handleRun({ id: script.id, name: script.name })}
+                  disabled={pendingId === script.id}
                 >
                   <Play className="mr-2 h-4 w-4" />
-                  Run
+                  {pendingId === script.id ? "Running..." : "Run"}
                 </Button>
                 <Button variant="outline" size="icon" asChild title="View details">
                   <Link href={`/scripts/${script.id}`}>
@@ -164,6 +215,8 @@ export default function ScriptsList() {
         <RunScriptDialog
           scriptId={runTarget.id}
           scriptName={runTarget.name}
+          initialResult={runTarget.initialResult ?? null}
+          initialSchema={runTarget.initialSchema ?? null}
           open={!!runTarget}
           onOpenChange={(o) => { if (!o) setRunTarget(null); }}
         />
