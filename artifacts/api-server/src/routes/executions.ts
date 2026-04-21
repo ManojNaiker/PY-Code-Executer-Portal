@@ -12,6 +12,7 @@ import * as os from "os";
 import multer from "multer";
 import { parseScriptInputs } from "../lib/scriptParser";
 import { ensureDependencies, getDepsDir, type DepInstallResult } from "../lib/pythonDeps";
+import tkShimSource from "../lib/tkShim.py";
 
 const router = Router();
 
@@ -20,7 +21,14 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
-async function runPython(code: string, args: string[] = [], stdin?: string | null, fileBuffer?: Buffer | null, fileName?: string | null): Promise<{
+async function runPython(
+  code: string,
+  args: string[] = [],
+  stdin?: string | null,
+  fileBuffer?: Buffer | null,
+  fileName?: string | null,
+  tkInputs?: { fields?: Record<string, string>; action?: string } | null,
+): Promise<{
   success: boolean;
   stdout: string;
   stderr: string;
@@ -29,29 +37,48 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
   deps: DepInstallResult;
 }> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pyexec-"));
+
+  // If GUI inputs were provided, prepend the headless tkinter shim so widget
+  // calls map onto our stubs and mainloop() invokes the user-selected button.
+  const useShim = !!tkInputs;
+  const finalCode = useShim ? `${tkShimSource}\n# === USER SCRIPT ===\n${code}` : code;
   const scriptPath = path.join(tmpDir, "script.py");
-  await fs.writeFile(scriptPath, code, "utf-8");
+  await fs.writeFile(scriptPath, finalCode, "utf-8");
 
   let finalArgs = [...args];
+  let uploadedFilePath: string | null = null;
   if (fileBuffer && fileName) {
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = path.join(tmpDir, safeName);
-    await fs.writeFile(filePath, fileBuffer);
-    finalArgs.push(filePath);
+    uploadedFilePath = path.join(tmpDir, safeName);
+    await fs.writeFile(uploadedFilePath, fileBuffer);
+    if (!useShim) {
+      // For non-GUI scripts, file path is appended to argv as before.
+      finalArgs.push(uploadedFilePath);
+    }
   }
 
   const deps = await ensureDependencies(code);
+
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: os.tmpdir(),
+    TMPDIR: os.tmpdir(),
+    PYTHONPATH: getDepsDir(),
+  };
+  if (useShim) {
+    env.PYEXEC_TK_INPUTS = JSON.stringify({
+      fields: tkInputs?.fields ?? {},
+      action: tkInputs?.action ?? "",
+      file: uploadedFilePath ?? "",
+    });
+    if (uploadedFilePath) env.PYEXEC_TK_FILE = uploadedFilePath;
+  }
 
   const start = Date.now();
   return new Promise((resolve) => {
     const proc = spawn("python3", [scriptPath, ...finalArgs], {
       timeout: 60000,
-      env: {
-        PATH: process.env.PATH,
-        HOME: os.tmpdir(),
-        TMPDIR: os.tmpdir(),
-        PYTHONPATH: getDepsDir(),
-      },
+      env,
       cwd: tmpDir,
     });
 
@@ -139,20 +166,37 @@ router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (r
 
     let args: string[] = [];
     let stdin: string | null | undefined = undefined;
+    let tkInputs: { fields?: Record<string, string>; action?: string } | null = null;
     const file = (req as any).file as { buffer: Buffer; originalname: string } | undefined;
+
+    const parseTk = (raw: unknown) => {
+      if (!raw) return null;
+      try {
+        const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (obj && typeof obj === "object") {
+          return {
+            fields: (obj as any).fields && typeof (obj as any).fields === "object" ? (obj as any).fields : {},
+            action: typeof (obj as any).action === "string" ? (obj as any).action : "",
+          };
+        }
+      } catch { /* ignore */ }
+      return null;
+    };
 
     if (file) {
       const rawArgs = (req.body?.args ?? "[]");
       try { args = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs; }
       catch { args = []; }
       stdin = req.body?.stdin || null;
+      tkInputs = parseTk(req.body?.tkInputs);
     } else {
       args = req.body?.args ?? [];
       stdin = req.body?.stdin ?? null;
+      tkInputs = parseTk(req.body?.tkInputs);
     }
     if (!Array.isArray(args)) args = [];
 
-    await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name, hasFile: !!file } });
+    await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name, hasFile: !!file, gui: !!tkInputs } });
 
     const result = await runPython(
       script.code,
@@ -160,6 +204,7 @@ router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (r
       stdin,
       file?.buffer ?? null,
       file?.originalname ?? null,
+      tkInputs,
     );
 
     const [execution] = await db.insert(executionsTable).values({

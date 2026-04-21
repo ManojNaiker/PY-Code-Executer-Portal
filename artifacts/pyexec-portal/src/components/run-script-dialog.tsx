@@ -43,6 +43,22 @@ type DetectedGui = {
   hasMainLoop: boolean;
 } | null;
 
+type TkField = {
+  label: string;
+  kind: "text" | "password" | "number" | "select" | "checkbox" | "textarea";
+  choices?: string[];
+  default?: string;
+};
+
+type TkAction = { label: string };
+
+type TkForm = {
+  fields: TkField[];
+  actions: TkAction[];
+  needsFile: boolean;
+  fileLabel: string | null;
+} | null;
+
 type InputsSchema = {
   args: DetectedArg[];
   inputs: DetectedInput[];
@@ -50,6 +66,7 @@ type InputsSchema = {
   stdinPrompt: string | null;
   file: FileSpec;
   gui: DetectedGui;
+  tkForm: TkForm;
 };
 
 type ExecResult = {
@@ -102,8 +119,22 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [inputValues, setInputValues] = useState<string[]>([]);
   const [extraStdin, setExtraStdin] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [tkValues, setTkValues] = useState<Record<string, string>>({});
+  const [tkAction, setTkAction] = useState<string>("");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ExecResult | null>(initialResult ?? null);
+
+  function initTkValues(s: InputsSchema): Record<string, string> {
+    const init: Record<string, string> = {};
+    if (s.tkForm) {
+      for (const f of s.tkForm.fields) {
+        if (f.default != null) init[f.label] = f.default;
+        else if (f.kind === "checkbox") init[f.label] = "false";
+        else init[f.label] = "";
+      }
+    }
+    return init;
+  }
 
   useEffect(() => {
     if (!open) {
@@ -112,6 +143,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setInputValues([]);
       setExtraStdin("");
       setFile(null);
+      setTkValues({});
+      setTkAction("");
       setResult(null);
       return;
     }
@@ -120,6 +153,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setSchema(initialSchema);
       setValues(makeInitArgs(initialSchema));
       setInputValues(new Array(initialSchema.inputs.length).fill(""));
+      setTkValues(initTkValues(initialSchema));
+      setTkAction(initialSchema.tkForm?.actions?.[0]?.label ?? "");
       return;
     }
     setLoadingSchema(true);
@@ -129,20 +164,29 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
         setSchema(data);
         setValues(makeInitArgs(data));
         setInputValues(new Array(data.inputs.length).fill(""));
+        setTkValues(initTkValues(data));
+        setTkAction(data.tkForm?.actions?.[0]?.label ?? "");
       })
       .catch((e) => {
         toast({ title: "Failed to load script inputs", description: String(e), variant: "destructive" });
-        setSchema({ args: [], inputs: [], needsStdin: false, stdinPrompt: null, file: null, gui: null });
+        setSchema({ args: [], inputs: [], needsStdin: false, stdinPrompt: null, file: null, gui: null, tkForm: null });
       })
       .finally(() => setLoadingSchema(false));
   }, [open, scriptId, initialResult, initialSchema]);
+
+  const hasTkForm = !!schema?.tkForm && (
+    schema.tkForm.fields.length > 0 ||
+    schema.tkForm.actions.length > 0 ||
+    schema.tkForm.needsFile
+  );
 
   const hasInputs = !!schema && (
     schema.args.length > 0 ||
     schema.inputs.length > 0 ||
     schema.needsStdin ||
     schema.file != null ||
-    schema.gui != null
+    schema.gui != null ||
+    hasTkForm
   );
 
   function buildArgsList(): string[] {
@@ -180,12 +224,16 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     try {
       const args = buildArgsList();
       const stdin = buildStdin();
+      const tkInputsPayload = hasTkForm
+        ? { fields: tkValues, action: tkAction }
+        : null;
       let res: Response;
       if (file && !opts?.skipFile) {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("args", JSON.stringify(args));
         if (stdin) fd.append("stdin", stdin);
+        if (tkInputsPayload) fd.append("tkInputs", JSON.stringify(tkInputsPayload));
         res = await fetch(`/api/scripts/${scriptId}/execute`, {
           method: "POST",
           credentials: "include",
@@ -196,7 +244,11 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ args, stdin: stdin || null }),
+          body: JSON.stringify({
+            args,
+            stdin: stdin || null,
+            tkInputs: tkInputsPayload,
+          }),
         });
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -228,6 +280,12 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       if (!(inputValues[i] ?? "").length) {
         return `Please answer prompt: "${schema.inputs[i].prompt}"`;
       }
+    }
+    if (schema.tkForm?.needsFile && !file) {
+      return `Please upload: ${schema.tkForm.fileLabel ?? "File"}`;
+    }
+    if (schema.tkForm && schema.tkForm.actions.length > 0 && !tkAction) {
+      return "Please choose an action to run.";
     }
     return null;
   }
@@ -273,11 +331,116 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             <div>
               <div className="font-semibold">GUI application detected ({schema.gui.framework})</div>
               <p className="text-muted-foreground text-xs mt-1">
-                This script tries to open a desktop window. The server runs headless, so the native window
-                cannot be displayed in the browser. Any <code className="font-mono">input()</code>, file dialog,
-                or argument prompts will instead be collected from the form below and forwarded to the script.
+                {hasTkForm
+                  ? "We have rebuilt this desktop window as a web form. Fill the fields below and pick which button to run — the script will execute headlessly on the server."
+                  : "This script tries to open a desktop window. The server runs headless, so the native window cannot be displayed in the browser. Any input prompts will be collected from the form below and forwarded to the script."}
               </p>
             </div>
+          </div>
+        )}
+
+        {!loadingSchema && schema?.tkForm && hasTkForm && (
+          <div className="space-y-4 py-2">
+            {schema.tkForm.fields.length > 0 && (
+              <div className="space-y-4">
+                <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">
+                  Form Fields
+                </div>
+                {schema.tkForm.fields.map((f) => (
+                  <div key={f.label} className="space-y-1.5">
+                    <Label htmlFor={`tk-${f.label}`} className="flex items-center gap-2">
+                      {f.label}
+                      <Badge variant="outline" className="text-[10px]">{f.kind}</Badge>
+                    </Label>
+                    {f.kind === "select" && f.choices ? (
+                      <select
+                        id={`tk-${f.label}`}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                        value={tkValues[f.label] ?? ""}
+                        onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                      >
+                        <option value="">-- Select --</option>
+                        {f.choices.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    ) : f.kind === "checkbox" ? (
+                      <select
+                        id={`tk-${f.label}`}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                        value={tkValues[f.label] ?? "false"}
+                        onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                      >
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                      </select>
+                    ) : f.kind === "textarea" ? (
+                      <Textarea
+                        id={`tk-${f.label}`}
+                        value={tkValues[f.label] ?? ""}
+                        onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                        className="font-mono text-sm min-h-[80px]"
+                      />
+                    ) : (
+                      <Input
+                        id={`tk-${f.label}`}
+                        type={f.kind === "password" ? "password" : f.kind === "number" ? "number" : "text"}
+                        value={tkValues[f.label] ?? ""}
+                        placeholder={f.default ?? `Enter ${f.label.toLowerCase()}`}
+                        onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {schema.tkForm.needsFile && (
+              <div className="space-y-2 p-4 rounded-lg border border-dashed border-primary/40 bg-primary/5">
+                <Label className="flex items-center gap-2 font-semibold">
+                  <FileSpreadsheet className="h-4 w-4 text-primary" />
+                  {schema.tkForm.fileLabel ?? "File"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  This file replaces the native file dialog the script would normally open.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="file"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    className="cursor-pointer"
+                  />
+                  {file && (
+                    <Badge variant="secondary" className="shrink-0 gap-1">
+                      <Upload className="h-3 w-3" />
+                      {(file.size / 1024).toFixed(1)} KB
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {schema.tkForm.actions.length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="tk-action" className="flex items-center gap-2">
+                  Action to Run
+                  <span className="text-destructive text-xs">*</span>
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Pick which button from the original GUI you want to trigger.
+                </p>
+                <select
+                  id="tk-action"
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                  value={tkAction}
+                  onChange={(e) => setTkAction(e.target.value)}
+                >
+                  {schema.tkForm.actions.map((a) => (
+                    <option key={a.label} value={a.label}>{a.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
 

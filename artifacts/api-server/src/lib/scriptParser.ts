@@ -28,6 +28,24 @@ export type DetectedGui = {
   hasMainLoop: boolean;
 } | null;
 
+export type TkField = {
+  label: string;
+  kind: "text" | "password" | "number" | "select" | "checkbox" | "textarea";
+  choices?: string[];
+  default?: string;
+};
+
+export type TkAction = {
+  label: string;
+};
+
+export type TkForm = {
+  fields: TkField[];
+  actions: TkAction[];
+  needsFile: boolean;
+  fileLabel: string | null;
+} | null;
+
 export type ScriptInputsSchema = {
   args: DetectedArg[];
   inputs: DetectedInput[];
@@ -35,6 +53,7 @@ export type ScriptInputsSchema = {
   stdinPrompt: string | null;
   file: DetectedFile;
   gui: DetectedGui;
+  tkForm: TkForm;
 };
 
 function humanizeName(raw: string): string {
@@ -293,6 +312,241 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
   }
 
   const gui = detectGui(code);
+  const tkForm = gui && (gui.framework === "tkinter" || gui.framework === "customtkinter")
+    ? parseTkinterForm(code)
+    : null;
 
-  return { args, inputs, needsStdin, stdinPrompt, file, gui };
+  return { args, inputs, needsStdin, stdinPrompt, file, gui, tkForm };
+}
+
+// ----------------------------------------------------------------
+// Tkinter widget extraction → web form schema
+// ----------------------------------------------------------------
+
+function extractKwargs(callBody: string): Record<string, string> {
+  // Re-uses the same depth/quote-aware splitter as parseAddArgumentCall
+  const parts: string[] = [];
+  let depth = 0;
+  let inStr: string | null = null;
+  let cur = "";
+  for (let i = 0; i < callBody.length; i++) {
+    const c = callBody[i];
+    const prev = i > 0 ? callBody[i - 1] : "";
+    if (inStr) {
+      cur += c;
+      if (c === inStr && prev !== "\\") inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") { inStr = c; cur += c; continue; }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    if (c === "," && depth === 0) { parts.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  if (cur.trim()) parts.push(cur.trim());
+
+  const kw: Record<string, string> = {};
+  for (const p of parts) {
+    const m = p.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([\s\S]+)$/);
+    if (m) kw[m[1]] = m[2].trim();
+  }
+  return kw;
+}
+
+function findCalls(code: string, classNames: string[]): { name: string; body: string; index: number }[] {
+  const out: { name: string; body: string; index: number }[] = [];
+  const namePattern = classNames
+    .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  // Match either bare name (e.g. Entry) or attribute (e.g. ttk.Entry, tk.Button, ctk.CTkButton)
+  const re = new RegExp(`(?:[A-Za-z_][A-Za-z0-9_]*\\.)?(${namePattern})\\s*\\(`, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    const start = m.index + m[0].length;
+    let depth = 1;
+    let inStr: string | null = null;
+    let body = "";
+    let i = start;
+    while (i < code.length && depth > 0) {
+      const c = code[i];
+      const prev = i > 0 ? code[i - 1] : "";
+      if (inStr) {
+        if (c === inStr && prev !== "\\") inStr = null;
+        body += c;
+      } else if (c === '"' || c === "'") { inStr = c; body += c; }
+      else if (c === "(") { depth++; body += c; }
+      else if (c === ")") { depth--; if (depth === 0) break; body += c; }
+      else body += c;
+      i++;
+    }
+    out.push({ name: m[1], body, index: m.index });
+  }
+  return out;
+}
+
+function lastLabelTextBefore(code: string, beforeIndex: number): string | null {
+  // Walk backwards through Label(...) / CTkLabel(...) calls and find the closest
+  // text= value that appears before the widget definition.
+  const re = /(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:Label|CTkLabel)\s*\(/g;
+  let m: RegExpExecArray | null;
+  let lastText: string | null = null;
+  while ((m = re.exec(code))) {
+    if (m.index >= beforeIndex) break;
+    const start = m.index + m[0].length;
+    let depth = 1;
+    let inStr: string | null = null;
+    let body = "";
+    let i = start;
+    while (i < code.length && depth > 0) {
+      const c = code[i];
+      const prev = i > 0 ? code[i - 1] : "";
+      if (inStr) {
+        if (c === inStr && prev !== "\\") inStr = null;
+        body += c;
+      } else if (c === '"' || c === "'") { inStr = c; body += c; }
+      else if (c === "(") { depth++; body += c; }
+      else if (c === ")") { depth--; if (depth === 0) break; body += c; }
+      else body += c;
+      i++;
+    }
+    const kw = extractKwargs(body);
+    if (kw.text) {
+      const t = stripQuotes(kw.text).replace(/[:：]\s*$/, "").trim();
+      if (t) lastText = t;
+    }
+  }
+  return lastText;
+}
+
+function parseChoicesList(raw: string): string[] | undefined {
+  const t = raw.trim();
+  if (!(t.startsWith("[") && t.endsWith("]")) && !(t.startsWith("(") && t.endsWith(")"))) return undefined;
+  const inner = t.slice(1, -1);
+  const out: string[] = [];
+  let depth = 0;
+  let inStr: string | null = null;
+  let cur = "";
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    const prev = i > 0 ? inner[i - 1] : "";
+    if (inStr) { cur += c; if (c === inStr && prev !== "\\") inStr = null; continue; }
+    if (c === '"' || c === "'") { inStr = c; cur += c; continue; }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    if (c === "," && depth === 0) { out.push(stripQuotes(cur.trim())); cur = ""; continue; }
+    cur += c;
+  }
+  if (cur.trim()) out.push(stripQuotes(cur.trim()));
+  return out.filter(Boolean);
+}
+
+function dedupeBy<T>(items: T[], key: (t: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const it of items) {
+    const k = key(it).toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(it);
+  }
+  return out;
+}
+
+export function parseTkinterForm(code: string): TkForm {
+  const fields: TkField[] = [];
+
+  // --- Entries / CTkEntry ---
+  for (const call of findCalls(code, ["Entry", "CTkEntry"])) {
+    const kw = extractKwargs(call.body);
+    const showVal = kw.show ? stripQuotes(kw.show) : "";
+    const isPassword = showVal === "*" || showVal === "•" || showVal === "●";
+    const placeholder = kw.placeholder_text ? stripQuotes(kw.placeholder_text) : "";
+    const label =
+      lastLabelTextBefore(code, call.index) ||
+      placeholder ||
+      (kw.name ? stripQuotes(kw.name) : "") ||
+      "Input";
+    fields.push({
+      label,
+      kind: isPassword ? "password" : "text",
+      default: placeholder || undefined,
+    });
+  }
+
+  // --- Combobox / OptionMenu / CTkComboBox / CTkOptionMenu ---
+  for (const call of findCalls(code, ["Combobox", "OptionMenu", "CTkComboBox", "CTkOptionMenu", "Spinbox", "CTkSpinbox"])) {
+    const kw = extractKwargs(call.body);
+    const choices = kw.values ? parseChoicesList(kw.values) : undefined;
+    const label =
+      lastLabelTextBefore(code, call.index) ||
+      (kw.name ? stripQuotes(kw.name) : "") ||
+      "Select";
+    fields.push({
+      label,
+      kind: choices && choices.length > 0 ? "select" : "text",
+      choices,
+    });
+  }
+
+  // --- Checkbutton / CTkCheckBox / CTkSwitch ---
+  for (const call of findCalls(code, ["Checkbutton", "CTkCheckBox", "CTkSwitch"])) {
+    const kw = extractKwargs(call.body);
+    const label =
+      (kw.text ? stripQuotes(kw.text) : "") ||
+      lastLabelTextBefore(code, call.index) ||
+      "Option";
+    fields.push({ label, kind: "checkbox" });
+  }
+
+  // --- Text / CTkTextbox blocks (free-form input) ---
+  for (const call of findCalls(code, ["Text", "CTkTextbox", "ScrolledText"])) {
+    const kw = extractKwargs(call.body);
+    // Skip the "Activity Log" style readonly Text widgets — most are output panes.
+    // We still expose if the user explicitly bound a textvariable, but in general
+    // Text widgets are output, not input, so do not emit unless preceded by a Label.
+    const lbl = lastLabelTextBefore(code, call.index);
+    if (!lbl) continue;
+    fields.push({ label: lbl, kind: "textarea" });
+  }
+
+  // --- Buttons → actions ---
+  const actions: TkAction[] = [];
+  for (const call of findCalls(code, ["Button", "CTkButton"])) {
+    const kw = extractKwargs(call.body);
+    if (!kw.text || !kw.command) continue;
+    const text = stripQuotes(kw.text).trim();
+    if (!text) continue;
+    // Skip "Browse" / "Cancel" / "Close" / "Exit" buttons — these don't represent a real action.
+    if (/^(browse|cancel|close|exit|quit|reset|clear)$/i.test(text)) continue;
+    actions.push({ label: text });
+  }
+
+  // --- File upload need ---
+  const needsFile = /filedialog\.(askopenfilename|askopenfilenames|askopenfile)|tkFileDialog\./.test(code);
+  let fileLabel: string | null = null;
+  if (needsFile) {
+    // Prefer the label associated with a "Browse" button if present
+    for (const call of findCalls(code, ["Button", "CTkButton"])) {
+      const kw = extractKwargs(call.body);
+      if (kw.text && /browse/i.test(stripQuotes(kw.text))) {
+        const lbl = lastLabelTextBefore(code, call.index);
+        if (lbl) { fileLabel = lbl; break; }
+      }
+    }
+    if (!fileLabel) fileLabel = "File";
+  }
+
+  const dedupedFields = dedupeBy(fields, (f) => f.label);
+  const dedupedActions = dedupeBy(actions, (a) => a.label);
+
+  if (dedupedFields.length === 0 && dedupedActions.length === 0 && !needsFile) {
+    return null;
+  }
+
+  return {
+    fields: dedupedFields,
+    actions: dedupedActions,
+    needsFile,
+    fileLabel,
+  };
 }
