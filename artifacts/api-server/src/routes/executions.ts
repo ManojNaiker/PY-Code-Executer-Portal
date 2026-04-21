@@ -11,6 +11,7 @@ import * as path from "path";
 import * as os from "os";
 import multer from "multer";
 import { parseScriptInputs } from "../lib/scriptParser";
+import { ensureDependencies, getDepsDir, type DepInstallResult } from "../lib/pythonDeps";
 
 const router = Router();
 
@@ -25,6 +26,7 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
   stderr: string;
   exitCode: number;
   executionTimeMs: number;
+  deps: DepInstallResult;
 }> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pyexec-"));
   const scriptPath = path.join(tmpDir, "script.py");
@@ -38,6 +40,8 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
     finalArgs.push(filePath);
   }
 
+  const deps = await ensureDependencies(code);
+
   const start = Date.now();
   return new Promise((resolve) => {
     const proc = spawn("python3", [scriptPath, ...finalArgs], {
@@ -46,6 +50,7 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
         PATH: process.env.PATH,
         HOME: os.tmpdir(),
         TMPDIR: os.tmpdir(),
+        PYTHONPATH: getDepsDir(),
       },
       cwd: tmpDir,
     });
@@ -72,6 +77,7 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
         stderr: stderr.slice(0, 10000),
         exitCode: code ?? -1,
         executionTimeMs,
+        deps,
       });
     });
 
@@ -84,6 +90,7 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
         stderr: err.message,
         exitCode: -1,
         executionTimeMs,
+        deps,
       });
     });
   });
@@ -185,6 +192,7 @@ router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (r
       exitCode: result.exitCode,
       executionTimeMs: result.executionTimeMs,
       executionId: execution.id,
+      deps: result.deps,
     });
   } catch (err) {
     req.log.error({ err }, "Error executing script");
