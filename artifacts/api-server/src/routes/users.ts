@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { usersTable, departmentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { AssignUserDepartmentBody, AssignUserRoleBody, UpdateMyProfileBody } from "@workspace/api-zod";
@@ -30,8 +30,7 @@ async function ensureUserExists(clerkId: string, email: string, firstName?: stri
 }
 
 router.get("/users/me", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   try {
     let user = await getUserWithDept(userId);
     if (!user) {
@@ -46,8 +45,7 @@ router.get("/users/me", requireAuth, async (req, res) => {
 });
 
 router.put("/users/me", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const parsed = UpdateMyProfileBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
 
@@ -64,8 +62,7 @@ router.put("/users/me", requireAuth, async (req, res) => {
 });
 
 router.get("/users", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
   if (!me || me.role !== "admin") return res.status(403).json({ error: "Admin only" });
 
@@ -92,8 +89,7 @@ router.get("/users", requireAuth, async (req, res) => {
 });
 
 router.put("/users/:clerkId/department", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const adminId = auth.userId!;
+  const adminId = (req as any).userId as string;
   const admin = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, adminId) });
   if (!admin || admin.role !== "admin") return res.status(403).json({ error: "Admin only" });
 
@@ -114,8 +110,7 @@ router.put("/users/:clerkId/department", requireAuth, async (req, res) => {
 });
 
 router.put("/users/:clerkId/role", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const adminId = auth.userId!;
+  const adminId = (req as any).userId as string;
   const admin = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, adminId) });
   if (!admin || admin.role !== "admin") return res.status(403).json({ error: "Admin only" });
 

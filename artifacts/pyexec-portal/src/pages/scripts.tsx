@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useUser } from "@clerk/react";
+import { useAuth } from "@/hooks/use-auth";
 import { useGetMyProfile, getGetMyProfileQueryKey } from "@workspace/api-client-react";
 import { useState } from "react";
 import { RunScriptDialog } from "@/components/run-script-dialog";
@@ -27,7 +27,7 @@ import { RunScriptDialog } from "@/components/run-script-dialog";
 export default function ScriptsList() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user } = useUser();
+  const { user } = useAuth();
   const [runTarget, setRunTarget] = useState<{
     id: number;
     name: string;

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { departmentsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { CreateDepartmentBody } from "@workspace/api-zod";
@@ -24,8 +24,7 @@ router.get("/departments", requireAuth, async (req, res) => {
 });
 
 router.post("/departments", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const user = await getUserProfile(userId);
   if (!user || user.role !== "admin") {
     return res.status(403).json({ error: "Admin only" });
@@ -57,8 +56,7 @@ router.get("/departments/:id", requireAuth, async (req, res) => {
 });
 
 router.delete("/departments/:id", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const user = await getUserProfile(userId);
   if (!user || user.role !== "admin") return res.status(403).json({ error: "Admin only" });
 

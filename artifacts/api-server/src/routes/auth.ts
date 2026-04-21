@@ -2,86 +2,128 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
-import { createClerkClient } from "@clerk/backend";
 import bcrypt from "bcryptjs";
-import { requireAuth } from "../middlewares/requireAuth";
+import { requireAuth, signSession, setSessionCookie, clearSessionCookie, generateUserId } from "../lib/sessionAuth";
 import { logAudit } from "../lib/auditLogger";
 
 const router = Router();
 
 router.post("/auth/login", async (req, res) => {
-  const { email, password } = req.body;
-
+  const { email, password } = req.body || {};
   if (!email || !password) {
-    res.status(400).json({ error: "Email and password are required" });
-    return;
+    return res.status(400).json({ error: "Email and password are required" });
   }
 
   try {
     const user = await db.query.usersTable.findFirst({
-      where: eq(usersTable.email, email.toLowerCase().trim()),
+      where: eq(usersTable.email, String(email).toLowerCase().trim()),
     });
 
-    if (!user || !user.passwordHash || !user.clerkId) {
-      res.status(401).json({ error: "Invalid email or password" });
-      return;
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
-      res.status(401).json({ error: "Invalid email or password" });
-      return;
+      return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const secretKey = process.env.CLERK_SECRET_KEY!;
-    const clerkClient = createClerkClient({ secretKey });
+    const token = signSession({ uid: user.clerkId, email: user.email });
+    setSessionCookie(res, token);
 
-    const signInToken = await clerkClient.signInTokens.createSignInToken({
+    await logAudit({ req, userId: user.clerkId, userEmail: user.email, action: "user.login", resourceType: "user", resourceId: user.clerkId });
+
+    res.json({
+      id: user.id,
       userId: user.clerkId,
-      expiresInSeconds: 300,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      departmentId: user.departmentId,
     });
-
-    res.json({ ticket: signInToken.token, url: signInToken.url });
   } catch (err) {
     req.log.error({ err }, "Login error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-router.post("/auth/sync", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
-  const { email, firstName, lastName } = req.body;
+router.post("/auth/register", async (req, res) => {
+  const { email, password, firstName, lastName } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  if (typeof password !== "string" || password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
 
+  const normalizedEmail = String(email).toLowerCase().trim();
   try {
-    const existing = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
-    const allUsers = await db.select().from(usersTable);
-    const role = allUsers.length === 0 || (allUsers.length === 1 && existing) ? (existing?.role ?? "admin") : (existing?.role ?? "user");
-
+    const existing = await db.query.usersTable.findFirst({ where: eq(usersTable.email, normalizedEmail) });
     if (existing) {
-      await db.update(usersTable)
-        .set({ email: email || existing.email, firstName: firstName ?? existing.firstName, lastName: lastName ?? existing.lastName, updatedAt: new Date() })
-        .where(eq(usersTable.clerkId, userId));
-      if (!existing.createdAt) {
-        await logAudit({ req, userId, userEmail: email, action: "user.login", resourceType: "user", resourceId: userId });
-      }
-    } else {
-      const firstUser = allUsers.length === 0;
-      await db.insert(usersTable).values({
-        clerkId: userId,
-        email: email || "unknown@example.com",
-        firstName: firstName ?? null,
-        lastName: lastName ?? null,
-        role: firstUser ? "admin" : "user",
-      });
-      await logAudit({ req, userId, userEmail: email, action: "user.register", resourceType: "user", resourceId: userId });
+      return res.status(409).json({ error: "An account with this email already exists" });
     }
 
-    const user = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
-    res.json({ ...user, createdAt: user?.createdAt?.toISOString(), updatedAt: user?.updatedAt?.toISOString() });
+    const allUsers = await db.select().from(usersTable);
+    const role = allUsers.length === 0 ? "admin" : "user";
+    const passwordHash = await bcrypt.hash(password, 10);
+    const userId = generateUserId();
+
+    const [user] = await db.insert(usersTable).values({
+      clerkId: userId,
+      email: normalizedEmail,
+      firstName: firstName ?? null,
+      lastName: lastName ?? null,
+      role,
+      passwordHash,
+    }).returning();
+
+    const token = signSession({ uid: user.clerkId, email: user.email });
+    setSessionCookie(res, token);
+
+    await logAudit({ req, userId: user.clerkId, userEmail: user.email, action: "user.register", resourceType: "user", resourceId: user.clerkId });
+
+    res.status(201).json({
+      id: user.id,
+      userId: user.clerkId,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      departmentId: user.departmentId,
+    });
   } catch (err) {
-    req.log.error({ err }, "Error syncing user");
+    req.log.error({ err }, "Register error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/auth/logout", async (req, res) => {
+  const userId = (req as any).userId;
+  const userEmail = (req as any).userEmail;
+  clearSessionCookie(res);
+  if (userId) {
+    await logAudit({ req, userId, userEmail: userEmail ?? "", action: "user.logout", resourceType: "user", resourceId: userId });
+  }
+  res.json({ ok: true });
+});
+
+router.get("/auth/me", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  try {
+    const user = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!user) return res.status(401).json({ error: "User not found" });
+    res.json({
+      id: user.id,
+      userId: user.clerkId,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      departmentId: user.departmentId,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Auth me error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -2,14 +2,13 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { auditLogsTable, usersTable, scriptsTable, departmentsTable, executionsTable } from "@workspace/db";
 import { eq, desc, sql, count, and, gte } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
 
 router.get("/audit-logs", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
   if (!me || me.role !== "admin") return res.status(403).json({ error: "Admin only" });
 
@@ -46,8 +45,7 @@ router.get("/audit-logs", requireAuth, async (req, res) => {
 });
 
 router.get("/dashboard/stats", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
 
   try {
     const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });

@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { useUser, useClerk } from "@clerk/react";
+import { useAuth } from "@/hooks/use-auth";
 import { 
   Sidebar, 
   SidebarContent, 
@@ -32,17 +32,23 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 export function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const { user } = useUser();
-  const { signOut } = useClerk();
-  
+  const { user, signOut } = useAuth();
+
   const { data: profile } = useGetMyProfile({
     query: {
-      enabled: !!user?.id,
+      enabled: !!user?.userId,
       queryKey: getGetMyProfileQueryKey()
     }
   });
 
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = (profile?.role ?? user?.role) === "admin";
+
+  async function handleSignOut() {
+    await signOut();
+    window.location.href = "/";
+  }
+
+  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "";
 
   const navItems = [
     { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -108,14 +114,14 @@ export function Layout({ children }: { children: ReactNode }) {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="w-full justify-start">
                   <UserIcon className="mr-2 h-4 w-4" />
-                  <span className="truncate">{user?.fullName || user?.primaryEmailAddress?.emailAddress}</span>
+                  <span className="truncate">{displayName}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem disabled>
                   <span className="font-mono text-xs">{profile?.departmentName || 'No Department'}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => signOut({ redirectUrl: '/' })}>
+                <DropdownMenuItem onClick={handleSignOut}>
                   <LogOut className="mr-2 h-4 w-4" />
                   Sign out
                 </DropdownMenuItem>

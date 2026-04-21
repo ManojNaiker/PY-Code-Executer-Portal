@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { scriptsTable, usersTable, departmentsTable } from "@workspace/db";
 import { eq, and, isNull, or } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { UploadScriptBody } from "@workspace/api-zod";
@@ -26,8 +26,7 @@ function mapScript(script: any, deptName?: string | null, uploaderName?: string 
 }
 
 router.get("/scripts", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
 
   try {
     const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
@@ -61,8 +60,7 @@ router.get("/scripts", requireAuth, async (req, res) => {
 });
 
 router.post("/scripts", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
 
   const parsed = UploadScriptBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
@@ -91,8 +89,7 @@ router.post("/scripts", requireAuth, async (req, res) => {
 });
 
 router.get("/scripts/:id", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
@@ -129,8 +126,7 @@ router.get("/scripts/:id", requireAuth, async (req, res) => {
 });
 
 router.delete("/scripts/:id", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { scriptsTable, usersTable, executionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { spawn } from "child_process";
@@ -97,8 +97,7 @@ async function runPython(code: string, args: string[] = [], stdin?: string | nul
 }
 
 router.get("/scripts/:id/inputs", requireAuth, async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
@@ -122,8 +121,7 @@ router.get("/scripts/:id/inputs", requireAuth, async (req, res) => {
 });
 
 router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (req, res) => {
-  const auth = getAuth(req);
-  const userId = auth.userId!;
+  const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
