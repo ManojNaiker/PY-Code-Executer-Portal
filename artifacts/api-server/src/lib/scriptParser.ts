@@ -246,17 +246,28 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
   let file: DetectedFile = null;
 
   const fileDialogHit = /filedialog\.(askopenfilename|askopenfilenames|asksaveasfilename|askdirectory)|tkFileDialog\./.test(code);
-  const excelHit = /pd\.read_excel|openpyxl|xlrd|load_workbook|\.xlsx\b|\.xls\b/.test(code);
-  const csvHit = /pd\.read_csv|csv\.reader|csv\.DictReader|\.csv\b/.test(code);
-  const jsonFileHit = /json\.load\s*\(|\.json['"]/.test(code);
-  const imageHit = /cv2\.imread|Image\.open|imageio\.imread|\.png\b|\.jpg\b|\.jpeg\b/.test(code);
+
+  // Only consider file inputs when the script READS a file from a path supplied by
+  // the user (argparse file-like arg, sys.argv[N], input() that names a path, or
+  // filedialog). Plain extension mentions (like a hardcoded output filename) must
+  // NOT trigger a required file picker.
+  const usesArgvForPath = /sys\.argv\s*\[\s*-?\d+\s*\]/.test(code);
+  const fileLikeArg = args.find((a) => /file|path|input|excel|csv|sheet|image|workbook|xlsx|xls|csv/i.test(a.name));
+  const inputAsksForPath = inputs.some((i) => /file|path|excel|csv|xlsx|xls|sheet|workbook|image|json/i.test(i.prompt));
+
+  const excelRead = /pd\.read_excel\s*\(|load_workbook\s*\(|openpyxl\.load_workbook|xlrd\.open_workbook/.test(code);
+  const csvRead = /pd\.read_csv\s*\(|csv\.reader\s*\(|csv\.DictReader\s*\(/.test(code);
+  const jsonRead = /json\.load\s*\(/.test(code);
+  const imageRead = /cv2\.imread\s*\(|Image\.open\s*\(|imageio\.imread\s*\(/.test(code);
+
+  const hasUserPathSource = fileDialogHit || usesArgvForPath || !!fileLikeArg || inputAsksForPath;
 
   if (fileDialogHit) {
     let kind: NonNullable<DetectedFile>["kind"] = "any";
-    if (excelHit) kind = "excel";
-    else if (csvHit) kind = "csv";
-    else if (jsonFileHit) kind = "json";
-    else if (imageHit) kind = "image";
+    if (excelRead) kind = "excel";
+    else if (csvRead) kind = "csv";
+    else if (jsonRead) kind = "json";
+    else if (imageRead) kind = "image";
     file = {
       required: true,
       kind,
@@ -264,23 +275,21 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
       hint: "The file you upload here will be passed to the script in place of its native file picker.",
       source: "filedialog",
     };
-  } else if (excelHit) {
-    file = { required: false, kind: "excel", label: "Excel file (.xlsx, .xls)", hint: "File path will be passed to your script.", source: "extension" };
-  } else if (csvHit) {
-    file = { required: false, kind: "csv", label: "CSV file (.csv)", hint: "File path will be passed to your script.", source: "extension" };
-  } else if (jsonFileHit) {
-    file = { required: false, kind: "json", label: "JSON file (.json)", hint: "File path will be passed to your script.", source: "extension" };
-  } else if (imageHit) {
-    file = { required: false, kind: "image", label: "Image file", hint: "File path will be passed to your script.", source: "extension" };
-  }
-
-  if (file && file.source !== "filedialog") {
-    const looksRequired =
-      args.some((a) => /file|path|input|excel|csv|sheet|image/i.test(a.name)) ||
-      /sys\.argv\[1\]|sys\.argv\[-1\]/.test(code);
-    if (looksRequired || args.length === 0) {
-      file.required = excelHit || csvHit || imageHit;
-    }
+  } else if (hasUserPathSource && (excelRead || csvRead || jsonRead || imageRead)) {
+    const kind: NonNullable<DetectedFile>["kind"] =
+      excelRead ? "excel" : csvRead ? "csv" : jsonRead ? "json" : "image";
+    const label =
+      kind === "excel" ? "Excel file (.xlsx, .xls)" :
+      kind === "csv" ? "CSV file (.csv)" :
+      kind === "json" ? "JSON file (.json)" :
+      "Image file";
+    file = {
+      required: !!(fileLikeArg?.required) || usesArgvForPath || inputAsksForPath,
+      kind,
+      label,
+      hint: "File path will be passed to your script.",
+      source: fileLikeArg ? "argparse" : usesArgvForPath ? "argv" : "extension",
+    };
   }
 
   const gui = detectGui(code);
