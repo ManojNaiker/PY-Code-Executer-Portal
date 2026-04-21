@@ -302,3 +302,28 @@ export async function ensureDependencies(code: string): Promise<DepInstallResult
 export function getDepsDir(): string {
   return DEPS_DIR;
 }
+
+export type DepStatus = {
+  module: string;
+  package: string;
+  installed: boolean;
+};
+
+export async function checkDependencies(code: string): Promise<DepStatus[]> {
+  await ensureDepsDir();
+  const stdlib = await getStdlibModules();
+  installedCache = null; // always re-scan for fresh status
+  const imports = extractTopLevelImports(code);
+  const out: DepStatus[] = [];
+  for (const mod of imports) {
+    if (stdlib.has(mod)) continue;
+    const pkg = importToPackage(mod);
+    out.push({ module: mod, package: pkg, installed: await isInstalled(mod) });
+  }
+  return out;
+}
+
+export async function installDependencies(code: string): Promise<DepInstallResult> {
+  installedCache = null;
+  return ensureDependencies(code);
+}

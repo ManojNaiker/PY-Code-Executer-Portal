@@ -11,7 +11,7 @@ import * as path from "path";
 import * as os from "os";
 import multer from "multer";
 import { parseScriptInputs } from "../lib/scriptParser";
-import { ensureDependencies, getDepsDir, type DepInstallResult } from "../lib/pythonDeps";
+import { ensureDependencies, getDepsDir, checkDependencies, installDependencies, type DepInstallResult } from "../lib/pythonDeps";
 import tkShimSource from "../lib/tkShim.py";
 
 const router = Router();
@@ -143,6 +143,48 @@ router.get("/scripts/:id/inputs", requireAuth, async (req, res) => {
     res.json(schema);
   } catch (err) {
     req.log.error({ err }, "Error parsing script inputs");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/scripts/:id/dependencies", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!me) return res.status(401).json({ error: "User not found" });
+    const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    if (!script) return res.status(404).json({ error: "Script not found" });
+    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    const deps = await checkDependencies(script.code);
+    res.json({ deps });
+  } catch (err) {
+    req.log.error({ err }, "Error checking dependencies");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/scripts/:id/dependencies/install", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!me) return res.status(401).json({ error: "User not found" });
+    const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    if (!script) return res.status(404).json({ error: "Script not found" });
+    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    await logAudit({ req, userId, userEmail: me.email, action: "script.deps_install", resourceType: "script", resourceId: id, details: { scriptName: script.name } });
+    const result = await installDependencies(script.code);
+    const deps = await checkDependencies(script.code);
+    res.json({ result, deps });
+  } catch (err) {
+    req.log.error({ err }, "Error installing dependencies");
     res.status(500).json({ error: "Internal server error" });
   }
 });

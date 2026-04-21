@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard } from "lucide-react";
+import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type DetectedArg = {
@@ -83,6 +83,8 @@ type ExecResult = {
   };
 };
 
+type DepStatus = { module: string; package: string; installed: boolean };
+
 interface Props {
   scriptId: number;
   scriptName: string;
@@ -123,6 +125,9 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [tkAction, setTkAction] = useState<string>("");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ExecResult | null>(initialResult ?? null);
+  const [deps, setDeps] = useState<DepStatus[] | null>(null);
+  const [depsLoading, setDepsLoading] = useState(false);
+  const [installingDeps, setInstallingDeps] = useState(false);
 
   function initTkValues(s: InputsSchema): Record<string, string> {
     const init: Record<string, string> = {};
@@ -146,8 +151,15 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setTkValues({});
       setTkAction("");
       setResult(null);
+      setDeps(null);
       return;
     }
+    setDepsLoading(true);
+    fetch(`/api/scripts/${scriptId}/dependencies`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((data: { deps: DepStatus[] }) => setDeps(data.deps ?? []))
+      .catch(() => setDeps([]))
+      .finally(() => setDepsLoading(false));
     if (initialResult) setResult(initialResult);
     if (initialSchema) {
       setSchema(initialSchema);
@@ -290,6 +302,35 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     return null;
   }
 
+  async function installDeps() {
+    setInstallingDeps(true);
+    try {
+      const res = await fetch(`/api/scripts/${scriptId}/dependencies/install`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { result: ExecResult["deps"]; deps: DepStatus[] } = await res.json();
+      setDeps(data.deps ?? []);
+      const r = data.result;
+      if (r && r.failed && r.failed.length > 0) {
+        toast({
+          title: "Some dependencies failed",
+          description: r.failed.map((f) => f.pkg).join(", "),
+          variant: "destructive",
+        });
+      } else if (r && r.installed && r.installed.length > 0) {
+        toast({ title: "Dependencies installed", description: r.installed.join(", ") });
+      } else {
+        toast({ title: "All dependencies already installed" });
+      }
+    } catch (e) {
+      toast({ title: "Failed to install dependencies", description: String(e), variant: "destructive" });
+    } finally {
+      setInstallingDeps(false);
+    }
+  }
+
   function handleSubmit() {
     const err = validate();
     if (err) {
@@ -336,6 +377,74 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                   : "This script tries to open a desktop window. The server runs headless, so the native window cannot be displayed in the browser. Any input prompts will be collected from the form below and forwarded to the script."}
               </p>
             </div>
+          </div>
+        )}
+
+        {(depsLoading || (deps && deps.length > 0)) && (
+          <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold">Python Dependencies</span>
+              {deps && deps.length > 0 && (
+                <Badge variant="outline" className="ml-auto text-[10px]">
+                  {deps.filter((d) => d.installed).length}/{deps.length} installed
+                </Badge>
+              )}
+            </div>
+            {depsLoading ? (
+              <div className="text-xs text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin" /> Checking dependencies...
+              </div>
+            ) : deps && deps.length > 0 ? (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {deps.map((d) => (
+                    <Badge
+                      key={d.module}
+                      variant={d.installed ? "secondary" : "outline"}
+                      className={`text-[11px] gap-1 ${d.installed ? "" : "border-amber-500/50 text-amber-600 dark:text-amber-400"}`}
+                    >
+                      {d.installed ? (
+                        <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                      ) : (
+                        <AlertCircle className="h-3 w-3" />
+                      )}
+                      <span className="font-mono">{d.package}</span>
+                    </Badge>
+                  ))}
+                </div>
+                {deps.some((d) => !d.installed) ? (
+                  <div className="flex items-center gap-2 pt-1">
+                    <p className="text-xs text-muted-foreground flex-1">
+                      {deps.filter((d) => !d.installed).length} package(s) not yet installed. Install before running.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={installDeps}
+                      disabled={installingDeps}
+                      data-testid="button-install-deps"
+                    >
+                      {installingDeps ? (
+                        <>
+                          <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                          Installing...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="mr-1.5 h-3 w-3" />
+                          Install Dependencies
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                    All dependencies are installed and ready.
+                  </p>
+                )}
+              </>
+            ) : null}
           </div>
         )}
 
