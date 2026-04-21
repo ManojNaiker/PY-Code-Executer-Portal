@@ -12,16 +12,29 @@ export type DetectedArg = {
 
 export type DetectedFile = {
   required: boolean;
-  kind: "excel" | "csv" | "json" | "text";
+  kind: "excel" | "csv" | "json" | "text" | "image" | "any";
   label: string;
   hint: string;
+  source: "extension" | "filedialog" | "argparse" | "argv";
+} | null;
+
+export type DetectedInput = {
+  prompt: string;
+  secret: boolean;
+};
+
+export type DetectedGui = {
+  framework: "tkinter" | "pyqt5" | "pyqt6" | "pyside2" | "pyside6" | "wx" | "kivy" | "pysimplegui" | "customtkinter";
+  hasMainLoop: boolean;
 } | null;
 
 export type ScriptInputsSchema = {
   args: DetectedArg[];
+  inputs: DetectedInput[];
   needsStdin: boolean;
   stdinPrompt: string | null;
   file: DetectedFile;
+  gui: DetectedGui;
 };
 
 function humanizeName(raw: string): string {
@@ -179,6 +192,38 @@ function findAddArgumentCalls(code: string): string[] {
   return calls;
 }
 
+function detectGui(code: string): DetectedGui {
+  const checks: { fw: NonNullable<DetectedGui>["framework"]; re: RegExp; loop: RegExp }[] = [
+    { fw: "customtkinter", re: /\bimport\s+customtkinter|\bfrom\s+customtkinter\b/, loop: /\.mainloop\s*\(/ },
+    { fw: "tkinter", re: /\bimport\s+tkinter|\bfrom\s+tkinter\b|\bimport\s+Tkinter\b/, loop: /\.mainloop\s*\(/ },
+    { fw: "pyqt6", re: /\bfrom\s+PyQt6\b|\bimport\s+PyQt6\b/, loop: /\.exec(_)?\s*\(/ },
+    { fw: "pyqt5", re: /\bfrom\s+PyQt5\b|\bimport\s+PyQt5\b/, loop: /\.exec(_)?\s*\(/ },
+    { fw: "pyside6", re: /\bfrom\s+PySide6\b|\bimport\s+PySide6\b/, loop: /\.exec(_)?\s*\(/ },
+    { fw: "pyside2", re: /\bfrom\s+PySide2\b|\bimport\s+PySide2\b/, loop: /\.exec(_)?\s*\(/ },
+    { fw: "wx", re: /\bimport\s+wx\b|\bfrom\s+wx\b/, loop: /\.MainLoop\s*\(/ },
+    { fw: "kivy", re: /\bfrom\s+kivy\b|\bimport\s+kivy\b/, loop: /\.run\s*\(/ },
+    { fw: "pysimplegui", re: /\bimport\s+PySimpleGUI|\bfrom\s+PySimpleGUI\b/, loop: /\.read\s*\(|\.Window\s*\(/ },
+  ];
+  for (const c of checks) {
+    if (c.re.test(code)) {
+      return { framework: c.fw, hasMainLoop: c.loop.test(code) };
+    }
+  }
+  return null;
+}
+
+function detectInputCalls(code: string): DetectedInput[] {
+  const out: DetectedInput[] = [];
+  const re = /(?<![a-zA-Z0-9_])(input|getpass(?:\.getpass)?)\s*\(\s*(?:(['"])([^'"\\]*)\2)?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    const fn = m[1];
+    const prompt = (m[3] ?? "").trim() || "Input";
+    out.push({ prompt, secret: fn.includes("getpass") });
+  }
+  return out;
+}
+
 export function parseScriptInputs(code: string): ScriptInputsSchema {
   const args: DetectedArg[] = [];
 
@@ -190,38 +235,55 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
     }
   }
 
-  const inputCalls = [...code.matchAll(/(?<![a-zA-Z0-9_])input\s*\(\s*(?:(['"])([^'"\\]*)\1)?/g)];
-  let needsStdin = false;
-  let stdinPrompt: string | null = null;
-  if (inputCalls.length > 0) {
-    needsStdin = true;
-    const prompts = inputCalls.map((m) => m[2]).filter((x): x is string => !!x);
-    if (prompts.length > 0) stdinPrompt = prompts.join(" / ");
-  }
-  if (/sys\.stdin\.(read|readline|readlines)|fileinput\./.test(code)) {
-    needsStdin = true;
-  }
+  const inputs = detectInputCalls(code);
+  const needsStdin =
+    inputs.length > 0 ||
+    /sys\.stdin\.(read|readline|readlines)|fileinput\./.test(code);
+  const stdinPrompt = inputs.length > 0
+    ? inputs.map((i) => i.prompt).filter(Boolean).join(" / ") || null
+    : null;
 
   let file: DetectedFile = null;
-  const excelHit = /pd\.read_excel|openpyxl|xlrd|load_workbook|\.xlsx|\.xls\b/.test(code);
+
+  const fileDialogHit = /filedialog\.(askopenfilename|askopenfilenames|asksaveasfilename|askdirectory)|tkFileDialog\./.test(code);
+  const excelHit = /pd\.read_excel|openpyxl|xlrd|load_workbook|\.xlsx\b|\.xls\b/.test(code);
   const csvHit = /pd\.read_csv|csv\.reader|csv\.DictReader|\.csv\b/.test(code);
   const jsonFileHit = /json\.load\s*\(|\.json['"]/.test(code);
-  if (excelHit) {
-    file = { required: false, kind: "excel", label: "Excel file (.xlsx, .xls)", hint: "Bulk data via Excel — file path will be passed to your script." };
+  const imageHit = /cv2\.imread|Image\.open|imageio\.imread|\.png\b|\.jpg\b|\.jpeg\b/.test(code);
+
+  if (fileDialogHit) {
+    let kind: NonNullable<DetectedFile>["kind"] = "any";
+    if (excelHit) kind = "excel";
+    else if (csvHit) kind = "csv";
+    else if (jsonFileHit) kind = "json";
+    else if (imageHit) kind = "image";
+    file = {
+      required: true,
+      kind,
+      label: "Select a file (replaces native file dialog)",
+      hint: "The file you upload here will be passed to the script in place of its native file picker.",
+      source: "filedialog",
+    };
+  } else if (excelHit) {
+    file = { required: false, kind: "excel", label: "Excel file (.xlsx, .xls)", hint: "File path will be passed to your script.", source: "extension" };
   } else if (csvHit) {
-    file = { required: false, kind: "csv", label: "CSV file (.csv)", hint: "Bulk data via CSV — file path will be passed to your script." };
+    file = { required: false, kind: "csv", label: "CSV file (.csv)", hint: "File path will be passed to your script.", source: "extension" };
   } else if (jsonFileHit) {
-    file = { required: false, kind: "json", label: "JSON file (.json)", hint: "File path will be passed to your script." };
+    file = { required: false, kind: "json", label: "JSON file (.json)", hint: "File path will be passed to your script.", source: "extension" };
+  } else if (imageHit) {
+    file = { required: false, kind: "image", label: "Image file", hint: "File path will be passed to your script.", source: "extension" };
   }
 
-  if (file) {
+  if (file && file.source !== "filedialog") {
     const looksRequired =
-      args.some((a) => /file|path|input|excel|csv|sheet/i.test(a.name)) ||
+      args.some((a) => /file|path|input|excel|csv|sheet|image/i.test(a.name)) ||
       /sys\.argv\[1\]|sys\.argv\[-1\]/.test(code);
     if (looksRequired || args.length === 0) {
-      file.required = excelHit || csvHit;
+      file.required = excelHit || csvHit || imageHit;
     }
   }
 
-  return { args, needsStdin, stdinPrompt, file };
+  const gui = detectGui(code);
+
+  return { args, inputs, needsStdin, stdinPrompt, file, gui };
 }

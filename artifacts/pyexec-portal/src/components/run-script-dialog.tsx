@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload } from "lucide-react";
+import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type DetectedArg = {
@@ -30,16 +30,26 @@ type DetectedArg = {
 
 type FileSpec = {
   required: boolean;
-  kind: "excel" | "csv" | "json" | "text";
+  kind: "excel" | "csv" | "json" | "text" | "image" | "any";
   label: string;
   hint: string;
+  source: "extension" | "filedialog" | "argparse" | "argv";
+} | null;
+
+type DetectedInput = { prompt: string; secret: boolean };
+
+type DetectedGui = {
+  framework: string;
+  hasMainLoop: boolean;
 } | null;
 
 type InputsSchema = {
   args: DetectedArg[];
+  inputs: DetectedInput[];
   needsStdin: boolean;
   stdinPrompt: string | null;
   file: FileSpec;
+  gui: DetectedGui;
 };
 
 type ExecResult = {
@@ -63,15 +73,28 @@ const ACCEPT_BY_KIND: Record<string, string> = {
   excel: ".xlsx,.xls",
   csv: ".csv",
   json: ".json",
+  image: ".png,.jpg,.jpeg,.gif,.bmp,.webp",
   text: "*",
+  any: "*",
 };
+
+function makeInitArgs(schema: InputsSchema): Record<string, string> {
+  const init: Record<string, string> = {};
+  for (const a of schema.args) {
+    if (a.default != null) init[a.name] = a.default;
+    else if (a.type === "bool") init[a.name] = "false";
+    else init[a.name] = "";
+  }
+  return init;
+}
 
 export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, initialResult, initialSchema }: Props) {
   const { toast } = useToast();
   const [schema, setSchema] = useState<InputsSchema | null>(initialSchema ?? null);
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [stdin, setStdin] = useState("");
+  const [inputValues, setInputValues] = useState<string[]>([]);
+  const [extraStdin, setExtraStdin] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ExecResult | null>(initialResult ?? null);
@@ -80,7 +103,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     if (!open) {
       setSchema(null);
       setValues({});
-      setStdin("");
+      setInputValues([]);
+      setExtraStdin("");
       setFile(null);
       setResult(null);
       return;
@@ -88,13 +112,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     if (initialResult) setResult(initialResult);
     if (initialSchema) {
       setSchema(initialSchema);
-      const init: Record<string, string> = {};
-      for (const a of initialSchema.args) {
-        if (a.default != null) init[a.name] = a.default;
-        else if (a.type === "bool") init[a.name] = "false";
-        else init[a.name] = "";
-      }
-      setValues(init);
+      setValues(makeInitArgs(initialSchema));
+      setInputValues(new Array(initialSchema.inputs.length).fill(""));
       return;
     }
     setLoadingSchema(true);
@@ -102,22 +121,23 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       .then((r) => r.json())
       .then((data: InputsSchema) => {
         setSchema(data);
-        const init: Record<string, string> = {};
-        for (const a of data.args) {
-          if (a.default != null) init[a.name] = a.default;
-          else if (a.type === "bool") init[a.name] = "false";
-          else init[a.name] = "";
-        }
-        setValues(init);
+        setValues(makeInitArgs(data));
+        setInputValues(new Array(data.inputs.length).fill(""));
       })
       .catch((e) => {
         toast({ title: "Failed to load script inputs", description: String(e), variant: "destructive" });
-        setSchema({ args: [], needsStdin: false, stdinPrompt: null, file: null });
+        setSchema({ args: [], inputs: [], needsStdin: false, stdinPrompt: null, file: null, gui: null });
       })
       .finally(() => setLoadingSchema(false));
   }, [open, scriptId, initialResult, initialSchema]);
 
-  const hasInputs = !!schema && (schema.args.length > 0 || schema.needsStdin || schema.file != null);
+  const hasInputs = !!schema && (
+    schema.args.length > 0 ||
+    schema.inputs.length > 0 ||
+    schema.needsStdin ||
+    schema.file != null ||
+    schema.gui != null
+  );
 
   function buildArgsList(): string[] {
     if (!schema) return [];
@@ -138,11 +158,22 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     return out;
   }
 
+  function buildStdin(): string | null {
+    if (!schema) return null;
+    const lines: string[] = [];
+    for (const v of inputValues) lines.push(v);
+    if (extraStdin) lines.push(extraStdin);
+    if (lines.length === 0) return null;
+    // Each input() call reads one line
+    return lines.join("\n") + "\n";
+  }
+
   async function executeNow(opts?: { skipFile?: boolean }) {
     setRunning(true);
     setResult(null);
     try {
       const args = buildArgsList();
+      const stdin = buildStdin();
       let res: Response;
       if (file && !opts?.skipFile) {
         const fd = new FormData();
@@ -187,6 +218,11 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     if (schema.file?.required && !file) {
       return `Please upload: ${schema.file.label}`;
     }
+    for (let i = 0; i < (schema.inputs?.length ?? 0); i++) {
+      if (!(inputValues[i] ?? "").length) {
+        return `Please answer prompt: "${schema.inputs[i].prompt}"`;
+      }
+    }
     return null;
   }
 
@@ -225,12 +261,26 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
           </div>
         )}
 
+        {!loadingSchema && schema && schema.gui && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 flex gap-2 text-sm">
+            <MonitorPlay className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-semibold">GUI application detected ({schema.gui.framework})</div>
+              <p className="text-muted-foreground text-xs mt-1">
+                This script tries to open a desktop window. The server runs headless, so the native window
+                cannot be displayed in the browser. Any <code className="font-mono">input()</code>, file dialog,
+                or argument prompts will instead be collected from the form below and forwarded to the script.
+              </p>
+            </div>
+          </div>
+        )}
+
         {!loadingSchema && schema && hasInputs && (
           <div className="space-y-5 py-2">
             {schema.args.length > 0 && (
               <div className="space-y-4">
                 <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">
-                  Required Fields
+                  Command-line Arguments
                 </div>
                 {schema.args.map((a) => (
                   <div key={a.name} className="space-y-1.5">
@@ -280,6 +330,38 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
               </div>
             )}
 
+            {schema.inputs.length > 0 && (
+              <div className="space-y-4">
+                <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide flex items-center gap-2">
+                  <Keyboard className="h-4 w-4" />
+                  Interactive Prompts
+                </div>
+                <p className="text-xs text-muted-foreground -mt-2">
+                  The script asks for input. Fill each prompt below — values will be sent in order.
+                </p>
+                {schema.inputs.map((inp, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <Label htmlFor={`input-${idx}`} className="flex items-center gap-2">
+                      {inp.prompt || `Prompt ${idx + 1}`}
+                      <span className="text-destructive text-xs">*</span>
+                      {inp.secret && <Badge variant="outline" className="text-[10px]">password</Badge>}
+                    </Label>
+                    <Input
+                      id={`input-${idx}`}
+                      type={inp.secret ? "password" : "text"}
+                      value={inputValues[idx] ?? ""}
+                      onChange={(e) => {
+                        const next = [...inputValues];
+                        next[idx] = e.target.value;
+                        setInputValues(next);
+                      }}
+                      placeholder="Type your answer..."
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
             {schema.file && (
               <div className="space-y-2 p-4 rounded-lg border border-dashed border-primary/40 bg-primary/5">
                 <Label className="flex items-center gap-2 font-semibold">
@@ -305,7 +387,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
               </div>
             )}
 
-            {schema.needsStdin && (
+            {schema.needsStdin && schema.inputs.length === 0 && (
               <div className="space-y-1.5">
                 <Label htmlFor="stdin-input" className="flex items-center gap-2">
                   Standard Input
@@ -317,8 +399,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 </Label>
                 <Textarea
                   id="stdin-input"
-                  value={stdin}
-                  onChange={(e) => setStdin(e.target.value)}
+                  value={extraStdin}
+                  onChange={(e) => setExtraStdin(e.target.value)}
                   placeholder="Type the value(s) the script will read..."
                   className="font-mono text-sm min-h-[80px]"
                 />
@@ -374,7 +456,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          {hasInputs && (
+          {hasInputs ? (
             <Button onClick={handleSubmit} disabled={running || loadingSchema}>
               {running ? (
                 "Executing..."
@@ -385,12 +467,13 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 </>
               )}
             </Button>
-          )}
-          {!hasInputs && result && (
-            <Button onClick={() => executeNow()} disabled={running}>
-              <Play className="mr-2 h-4 w-4" />
-              Run Again
-            </Button>
+          ) : (
+            !loadingSchema && (
+              <Button onClick={() => executeNow()} disabled={running}>
+                <Play className="mr-2 h-4 w-4" />
+                {result ? "Run Again" : "Execute"}
+              </Button>
+            )
           )}
         </DialogFooter>
       </DialogContent>
