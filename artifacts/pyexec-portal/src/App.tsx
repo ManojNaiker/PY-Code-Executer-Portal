@@ -35,49 +35,50 @@ if (!clerkPubKey) {
 function AuthPageLayout({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: string }) {
   return (
     <div className="flex min-h-[100dvh] bg-white" style={{ fontFamily: "'Segoe UI', Inter, sans-serif" }}>
-      <div className="hidden lg:flex lg:w-[45%] bg-[#0f1e3c] flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-0 left-0 w-64 h-64 bg-blue-400 rounded-full -translate-x-1/2 -translate-y-1/2" />
-          <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-600 rounded-full translate-x-1/4 translate-y-1/4" />
+      <div className="hidden lg:flex lg:w-[45%] flex-col justify-between p-12 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)" }}>
+        <div className="absolute inset-0 opacity-20">
+          <div className="absolute top-0 left-0 w-64 h-64 bg-yellow-300 rounded-full -translate-x-1/2 -translate-y-1/2 blur-2xl" />
+          <div className="absolute bottom-0 right-0 w-96 h-96 bg-cyan-300 rounded-full translate-x-1/4 translate-y-1/4 blur-3xl" />
+          <div className="absolute top-1/2 left-1/3 w-72 h-72 bg-pink-400 rounded-full blur-3xl" />
         </div>
 
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-12">
-            <div className="w-10 h-10 bg-[#0078d4] rounded-sm flex items-center justify-center">
+            <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-lg">
               <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white">
                 <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 2h2v2h2v-2h2v2h-2v2h2v2h-2v-2h-2v2h-2v-2h2v-2h-2v-2z"/>
               </svg>
             </div>
             <div>
               <div className="text-white font-semibold text-lg leading-tight">PyExec Portal</div>
-              <div className="text-blue-300 text-xs">Enterprise Platform</div>
+              <div className="text-white/80 text-xs">Enterprise Platform</div>
             </div>
           </div>
 
-          <h1 className="text-white text-3xl font-semibold leading-tight mb-4">
+          <h1 className="text-white text-3xl font-semibold leading-tight mb-4 drop-shadow">
             Secure Python<br />Execution Platform
           </h1>
-          <p className="text-blue-200 text-sm leading-relaxed mb-10">
+          <p className="text-white/90 text-sm leading-relaxed mb-10">
             Run Python scripts securely from your browser.<br />
             Department-based access control and full audit trail.
           </p>
 
-          <div className="space-y-5">
+          <div className="space-y-4">
             {[
-              { icon: "🔒", label: "Role-based access control" },
-              { icon: "🏢", label: "Department-level script isolation" },
-              { icon: "📋", label: "Complete audit logging" },
-              { icon: "⚡", label: "Instant browser execution" },
+              { icon: "🔒", label: "Role-based access control", bg: "bg-emerald-400/30" },
+              { icon: "🏢", label: "Department-level script isolation", bg: "bg-cyan-400/30" },
+              { icon: "📋", label: "Complete audit logging", bg: "bg-amber-400/30" },
+              { icon: "⚡", label: "Instant browser execution", bg: "bg-pink-400/30" },
             ].map(f => (
               <div key={f.label} className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-[#0078d4]/20 rounded-sm flex items-center justify-center text-sm">{f.icon}</div>
-                <span className="text-blue-100 text-sm">{f.label}</span>
+                <div className={`w-9 h-9 ${f.bg} backdrop-blur-sm rounded-lg flex items-center justify-center text-base shadow-md`}>{f.icon}</div>
+                <span className="text-white text-sm font-medium">{f.label}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="relative z-10 text-blue-400 text-xs">
+        <div className="relative z-10 text-white/70 text-xs">
           © {new Date().getFullYear()} PyExec Portal. Enterprise Edition.
         </div>
       </div>
@@ -338,7 +339,7 @@ function ClerkProviderWithRoutes() {
 
 function App() {
   useEffect(() => {
-    document.documentElement.classList.add('dark');
+    document.documentElement.classList.remove('dark');
   }, []);
 
   return (
