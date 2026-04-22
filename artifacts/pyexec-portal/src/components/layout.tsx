@@ -25,7 +25,8 @@ import {
   ShieldAlert,
   LogOut,
   User as UserIcon,
-  Menu
+  Menu,
+  FolderTree
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -52,6 +53,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const navItems = [
     { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { title: "Script Mapping", href: "/script-mapping", icon: FolderTree },
     { title: "Scripts", href: "/scripts", icon: Code2 },
     { title: "Upload Script", href: "/upload", icon: Upload },
   ];

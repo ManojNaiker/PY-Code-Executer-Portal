@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "./pages/home";
 import Dashboard from "./pages/dashboard";
 import ScriptsList from "./pages/scripts";
+import ScriptMapping from "./pages/script-mapping";
 import ScriptDetail from "./pages/script-detail";
 import Upload from "./pages/upload";
 import AdminDepartments from "./pages/admin-departments";
@@ -212,6 +213,7 @@ function AppRoutes() {
           <Route path="/sign-up" component={SignUpPage} />
           <Route path="/dashboard"><AuthGuard><Dashboard /></AuthGuard></Route>
           <Route path="/scripts"><AuthGuard><ScriptsList /></AuthGuard></Route>
+          <Route path="/script-mapping"><AuthGuard><ScriptMapping /></AuthGuard></Route>
           <Route path="/scripts/:id"><AuthGuard><ScriptDetail /></AuthGuard></Route>
           <Route path="/upload"><AuthGuard><Upload /></AuthGuard></Route>
           <Route path="/admin/departments"><AuthGuard><AdminDepartments /></AuthGuard></Route>

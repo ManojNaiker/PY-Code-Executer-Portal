@@ -62,16 +62,24 @@ export interface AssignRoleBody {
   role: AssignRoleBodyRole;
 }
 
+export interface SupportingFile {
+  name: string;
+  size: number;
+}
+
 export interface Script {
   id: number;
   name: string;
   description?: string | null;
+  subject?: string | null;
   filename: string;
   code: string;
   departmentId?: number | null;
   departmentName?: string | null;
   uploadedBy: string;
   uploadedByName?: string | null;
+  hasLogo?: boolean;
+  supportingFiles?: SupportingFile[];
   createdAt: string;
   updatedAt: string;
 }
@@ -79,6 +87,7 @@ export interface Script {
 export interface UploadScriptBody {
   name: string;
   description?: string | null;
+  subject?: string | null;
   filename: string;
   code: string;
   departmentId?: number | null;

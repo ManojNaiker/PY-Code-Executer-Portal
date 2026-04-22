@@ -491,6 +491,9 @@ components:
         description:
           type: string
           nullable: true
+        subject:
+          type: string
+          nullable: true
         filename:
           type: string
         code:
@@ -506,6 +509,12 @@ components:
         uploadedByName:
           type: string
           nullable: true
+        hasLogo:
+          type: boolean
+        supportingFiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupportingFile"
         createdAt:
           type: string
           format: date-time
@@ -529,6 +538,9 @@ components:
         description:
           type: string
           nullable: true
+        subject:
+          type: string
+          nullable: true
         filename:
           type: string
         code:
@@ -540,6 +552,17 @@ components:
         - name
         - filename
         - code
+
+    SupportingFile:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+      required:
+        - name
+        - size
 
     ExecuteScriptBody:
       type: object

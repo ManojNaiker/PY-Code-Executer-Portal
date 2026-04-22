@@ -14,12 +14,15 @@ function mapScript(script: any, deptName?: string | null, uploaderName?: string 
     id: script.id,
     name: script.name,
     description: script.description ?? null,
+    subject: script.subject ?? null,
     filename: script.filename,
     code: script.code,
     departmentId: script.departmentId ?? null,
     departmentName: deptName ?? null,
     uploadedBy: script.uploadedBy,
     uploadedByName: uploaderName ?? null,
+    hasLogo: !!script.logoPath,
+    supportingFiles: (script.supportingFiles ?? []).map((f: any) => ({ name: f.name, size: f.size })),
     createdAt: script.createdAt instanceof Date ? script.createdAt.toISOString() : script.createdAt,
     updatedAt: script.updatedAt instanceof Date ? script.updatedAt.toISOString() : script.updatedAt,
   };
@@ -71,6 +74,7 @@ router.post("/scripts", requireAuth, async (req, res) => {
 
     const [script] = await db.insert(scriptsTable).values({
       ...parsed.data,
+      subject: parsed.data.subject ?? null,
       uploadedBy: userId,
       departmentId: parsed.data.departmentId ?? null,
     }).returning();

@@ -14,12 +14,22 @@ export const ListScriptsResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   description: zod.string().nullish(),
+  subject: zod.string().nullish(),
   filename: zod.string(),
   code: zod.string(),
   departmentId: zod.number().nullish(),
   departmentName: zod.string().nullish(),
   uploadedBy: zod.string(),
   uploadedByName: zod.string().nullish(),
+  hasLogo: zod.boolean().optional(),
+  supportingFiles: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        size: zod.number(),
+      }),
+    )
+    .optional(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -31,6 +41,7 @@ export const ListScriptsResponse = zod.array(ListScriptsResponseItem);
 export const UploadScriptBody = zod.object({
   name: zod.string(),
   description: zod.string().nullish(),
+  subject: zod.string().nullish(),
   filename: zod.string(),
   code: zod.string(),
   departmentId: zod.number().nullish(),
@@ -47,12 +58,22 @@ export const GetScriptResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   description: zod.string().nullish(),
+  subject: zod.string().nullish(),
   filename: zod.string(),
   code: zod.string(),
   departmentId: zod.number().nullish(),
   departmentName: zod.string().nullish(),
   uploadedBy: zod.string(),
   uploadedByName: zod.string().nullish(),
+  hasLogo: zod.boolean().optional(),
+  supportingFiles: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        size: zod.number(),
+      }),
+    )
+    .optional(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });

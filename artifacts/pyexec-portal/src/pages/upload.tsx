@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 const formSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(100),
   description: z.string().max(500).optional(),
+  subject: z.string().max(100).optional(),
   departmentId: z.string().optional(),
 });
 
@@ -49,6 +50,7 @@ export default function Upload() {
     defaultValues: {
       name: "",
       description: "",
+      subject: "",
       departmentId: "none",
     },
   });
@@ -100,6 +102,7 @@ export default function Upload() {
       data: {
         name: values.name,
         description: values.description || null,
+        subject: values.subject?.trim() || null,
         filename: filename,
         code: fileContent,
         departmentId: values.departmentId && values.departmentId !== "none" ? parseInt(values.departmentId, 10) : null
@@ -158,6 +161,23 @@ export default function Upload() {
                     <FormControl>
                       <Input placeholder="Data Processor" {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="subject"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Subject / Folder</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Finance, HR, Reports" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Scripts are grouped by Subject in the Script Mapping view.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

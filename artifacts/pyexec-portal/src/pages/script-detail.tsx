@@ -12,6 +12,9 @@ import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { ExecutionResult } from "@workspace/api-client-react/src/generated/api.schemas";
+import { ScriptFilesManager } from "@/components/script-files-manager";
+import { useGetMyProfile, getGetMyProfileQueryKey } from "@workspace/api-client-react";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function ScriptDetail() {
   const [, params] = useRoute("/scripts/:id");
@@ -21,6 +24,11 @@ export default function ScriptDetail() {
   const [stdin, setStdin] = useState("");
   const [args, setArgs] = useState("");
   const [result, setResult] = useState<ExecutionResult | null>(null);
+  const { user } = useAuth();
+  const { data: profile } = useGetMyProfile({
+    query: { enabled: !!user?.id, queryKey: getGetMyProfileQueryKey() }
+  });
+  const isAdmin = profile?.role === "admin";
 
   const { data: script, isLoading } = useGetScript(scriptId, {
     query: {
@@ -182,11 +190,24 @@ export default function ScriptDetail() {
             </CardContent>
           </Card>
 
+          <ScriptFilesManager
+            scriptId={script.id}
+            hasLogo={!!script.hasLogo}
+            supportingFiles={script.supportingFiles ?? []}
+            isAdmin={isAdmin}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Metadata</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
+              {script.subject && (
+                <div className="flex justify-between items-center py-2 border-b">
+                  <span className="text-muted-foreground">Subject</span>
+                  <span className="font-medium">{script.subject}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center py-2 border-b">
                 <span className="text-muted-foreground">Department</span>
                 <span className="font-medium">{script.departmentName || "Global"}</span>
