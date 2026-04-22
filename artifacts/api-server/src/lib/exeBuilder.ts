@@ -119,11 +119,12 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
     }
   }
 
-  // Logo file inside bundle/
+  // Logo file inside bundle/ — preserve the original filename so scripts that
+  // reference a specific logo file (e.g. `alfresco_logo.ico`) can find it.
   let logoFilename = "";
   if (opts.logo) {
-    const ext = path.extname(opts.logo.filename) || ".png";
-    logoFilename = `logo${ext}`;
+    const safeLogo = path.basename(opts.logo.filename).replace(/[^A-Za-z0-9._\- ]/g, "_") || `logo${path.extname(opts.logo.filename) || ".png"}`;
+    logoFilename = safeLogo;
     await fsp.copyFile(opts.logo.absPath, path.join(bundleDir, logoFilename));
   }
 
