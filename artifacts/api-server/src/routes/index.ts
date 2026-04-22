@@ -6,6 +6,7 @@ import scriptsRouter from "./scripts";
 import executionsRouter from "./executions";
 import auditRouter from "./audit";
 import authRouter from "./auth";
+import aiEnhanceRouter from "./aiEnhance";
 
 const router: IRouter = Router();
 
@@ -15,6 +16,7 @@ router.use(departmentsRouter);
 router.use(usersRouter);
 router.use(scriptsRouter);
 router.use(executionsRouter);
+router.use(aiEnhanceRouter);
 router.use(auditRouter);
 
 export default router;

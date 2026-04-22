@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2 } from "lucide-react";
+import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2, Sparkles, ShieldAlert } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type DetectedArg = {
@@ -85,6 +85,24 @@ type ExecResult = {
 
 type DepStatus = { module: string; package: string; installed: boolean };
 
+type AiHint = {
+  label: string;
+  friendlyLabel?: string;
+  description?: string;
+  placeholder?: string;
+  validation?: string;
+  example?: string;
+};
+type AiActionHint = { label: string; friendlyLabel?: string; description?: string };
+type AiSchema = {
+  scriptTitle?: string;
+  scriptSummary?: string;
+  fields?: AiHint[];
+  args?: AiHint[];
+  actions?: AiActionHint[];
+  warnings?: string[];
+} | null;
+
 interface Props {
   scriptId: number;
   scriptName: string;
@@ -128,6 +146,17 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [deps, setDeps] = useState<DepStatus[] | null>(null);
   const [depsLoading, setDepsLoading] = useState(false);
   const [installingDeps, setInstallingDeps] = useState(false);
+  const [aiSchema, setAiSchema] = useState<AiSchema>(null);
+
+  function findFieldHint(label: string): AiHint | undefined {
+    return aiSchema?.fields?.find((h) => h.label === label);
+  }
+  function findArgHint(label: string): AiHint | undefined {
+    return aiSchema?.args?.find((h) => h.label === label);
+  }
+  function findActionHint(label: string): AiActionHint | undefined {
+    return aiSchema?.actions?.find((h) => h.label === label);
+  }
 
   function initTkValues(s: InputsSchema): Record<string, string> {
     const init: Record<string, string> = {};
@@ -152,6 +181,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setTkAction("");
       setResult(null);
       setDeps(null);
+      setAiSchema(null);
       return;
     }
     setDepsLoading(true);
@@ -160,6 +190,10 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       .then((data: { deps: DepStatus[] }) => setDeps(data.deps ?? []))
       .catch(() => setDeps([]))
       .finally(() => setDepsLoading(false));
+    fetch(`/api/scripts/${scriptId}/ai-schema`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((data: { aiSchema: AiSchema }) => setAiSchema(data.aiSchema ?? null))
+      .catch(() => setAiSchema(null));
     if (initialResult) setResult(initialResult);
     if (initialSchema) {
       setSchema(initialSchema);
@@ -346,18 +380,41 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Play className="h-5 w-5 text-primary" />
-            Run: {scriptName}
+            Run: {aiSchema?.scriptTitle ?? scriptName}
           </DialogTitle>
           <DialogDescription>
             {loadingSchema
               ? "Detecting required inputs..."
-              : hasInputs
-                ? "Provide the required inputs below, then click Execute."
-                : result
-                  ? "Execution result:"
-                  : "Ready to run."}
+              : aiSchema?.scriptSummary
+                ? aiSchema.scriptSummary
+                : hasInputs
+                  ? "Provide the required inputs below, then click Execute."
+                  : result
+                    ? "Execution result:"
+                    : "Ready to run."}
           </DialogDescription>
         </DialogHeader>
+
+        {aiSchema && (
+          <div className="rounded-md border border-purple-500/30 bg-purple-500/5 p-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <Sparkles className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+            <span>AI-enhanced labels, descriptions and safety hints are shown below.</span>
+          </div>
+        )}
+
+        {aiSchema?.warnings && aiSchema.warnings.length > 0 && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1.5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
+              <ShieldAlert className="h-4 w-4" />
+              Safety Warnings
+            </div>
+            <ul className="text-xs text-foreground/80 space-y-1 pl-6 list-disc">
+              {aiSchema.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {loadingSchema && (
           <div className="space-y-3 py-4">
@@ -455,12 +512,24 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">
                   Form Fields
                 </div>
-                {schema.tkForm.fields.map((f) => (
+                {schema.tkForm.fields.map((f) => {
+                  const hint = findFieldHint(f.label);
+                  return (
                   <div key={f.label} className="space-y-1.5">
                     <Label htmlFor={`tk-${f.label}`} className="flex items-center gap-2">
-                      {f.label}
+                      {hint?.friendlyLabel ?? f.label}
                       <Badge variant="outline" className="text-[10px]">{f.kind}</Badge>
+                      {hint && <Sparkles className="h-3 w-3 text-purple-500" />}
                     </Label>
+                    {hint?.description && (
+                      <p className="text-xs text-muted-foreground">{hint.description}</p>
+                    )}
+                    {hint?.example && (
+                      <p className="text-[11px] text-muted-foreground">
+                        <span className="font-semibold">Example:</span>{" "}
+                        <span className="font-mono">{hint.example}</span>
+                      </p>
+                    )}
                     {f.kind === "select" && f.choices ? (
                       <select
                         id={`tk-${f.label}`}
@@ -500,7 +569,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -544,10 +614,21 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                   value={tkAction}
                   onChange={(e) => setTkAction(e.target.value)}
                 >
-                  {schema.tkForm.actions.map((a) => (
-                    <option key={a.label} value={a.label}>{a.label}</option>
-                  ))}
+                  {schema.tkForm.actions.map((a) => {
+                    const ah = findActionHint(a.label);
+                    return (
+                      <option key={a.label} value={a.label}>
+                        {ah?.friendlyLabel ? `${ah.friendlyLabel} (${a.label})` : a.label}
+                      </option>
+                    );
+                  })}
                 </select>
+                {tkAction && findActionHint(tkAction)?.description && (
+                  <p className="text-xs text-muted-foreground flex items-start gap-1.5 pt-1">
+                    <Sparkles className="h-3 w-3 text-purple-500 mt-0.5 shrink-0" />
+                    {findActionHint(tkAction)?.description}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -560,17 +641,31 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">
                   Command-line Arguments
                 </div>
-                {schema.args.map((a) => (
+                {schema.args.map((a) => {
+                  const ahint = findArgHint(a.label);
+                  return (
                   <div key={a.name} className="space-y-1.5">
                     <Label htmlFor={`arg-${a.name}`} className="flex items-center gap-2">
-                      {a.label}
+                      {ahint?.friendlyLabel ?? a.label}
                       {a.required && <span className="text-destructive text-xs">*</span>}
                       <Badge variant="secondary" className="text-[10px] font-mono">
                         {a.flag ?? a.name}
                       </Badge>
                       <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
+                      {ahint && <Sparkles className="h-3 w-3 text-purple-500" />}
                     </Label>
-                    {a.help && <p className="text-xs text-muted-foreground">{a.help}</p>}
+                    {ahint?.description && (
+                      <p className="text-xs text-muted-foreground">{ahint.description}</p>
+                    )}
+                    {!ahint?.description && a.help && (
+                      <p className="text-xs text-muted-foreground">{a.help}</p>
+                    )}
+                    {ahint?.example && (
+                      <p className="text-[11px] text-muted-foreground">
+                        <span className="font-semibold">Example:</span>{" "}
+                        <span className="font-mono">{ahint.example}</span>
+                      </p>
+                    )}
                     {a.choices ? (
                       <select
                         id={`arg-${a.name}`}
@@ -604,7 +699,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

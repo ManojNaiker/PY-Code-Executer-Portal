@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { departmentsTable } from "./departments";
@@ -12,6 +12,7 @@ export const scriptsTable = pgTable("scripts", {
   code: text("code").notNull(),
   departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   uploadedBy: text("uploaded_by").notNull().references(() => usersTable.clerkId),
+  aiSchema: jsonb("ai_schema"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Play, Trash2, FileCode2 } from "lucide-react";
+import { Play, Trash2, FileCode2, Sparkles, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +35,36 @@ export default function ScriptsList() {
     initialSchema?: any;
   } | null>(null);
   const [pendingId, setPendingId] = useState<number | null>(null);
+  const [enhancingId, setEnhancingId] = useState<number | null>(null);
+
+  async function handleEnhance(script: { id: number; name: string }) {
+    setEnhancingId(script.id);
+    try {
+      const r = await fetch(`/api/scripts/${script.id}/ai-enhance`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      toast({
+        title: "AI enhancement complete",
+        description: data.aiSchema?.scriptTitle
+          ? `Generated: ${data.aiSchema.scriptTitle}`
+          : "Form labels and descriptions updated.",
+      });
+    } catch (e: any) {
+      toast({
+        title: "AI enhancement failed",
+        description: e?.message ?? String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setEnhancingId(null);
+    }
+  }
 
   async function handleRun(script: { id: number; name: string }) {
     setPendingId(script.id);
@@ -179,6 +209,22 @@ export default function ScriptsList() {
                     <FileCode2 className="h-4 w-4" />
                   </Link>
                 </Button>
+                {isAdmin && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    title="Enhance with AI (better labels, descriptions, warnings)"
+                    onClick={() => handleEnhance({ id: script.id, name: script.name })}
+                    disabled={enhancingId === script.id}
+                    data-testid={`button-ai-enhance-${script.id}`}
+                  >
+                    {enhancingId === script.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 text-purple-500" />
+                    )}
+                  </Button>
+                )}
                 {isAdmin && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
