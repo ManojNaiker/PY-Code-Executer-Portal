@@ -198,17 +198,29 @@ export function ScriptFilesManager({ scriptId, hasLogo, supportingFiles, isAdmin
           )}
         </div>
 
-        <div className="pt-2 border-t">
+        <div className="pt-2 border-t space-y-2">
           <Button
             variant="default"
             className="w-full"
+            onClick={() => { window.location.href = `/api/scripts/${scriptId}/exe`; }}
+            disabled={busy === "exe"}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {supportingFiles.length > 0 ? "Download EXE Bundle (.zip)" : "Download EXE (.exe)"}
+          </Button>
+          <p className="text-xs text-muted-foreground text-center">
+            {supportingFiles.length > 0
+              ? "ZIP contains the .exe and all supporting files. Logo is used as the EXE icon."
+              : "Standalone Windows .exe. The logo is used as the EXE icon."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
             onClick={() => { window.location.href = `/api/scripts/${scriptId}/download`; }}
           >
-            <Download className="h-4 w-4 mr-2" /> Download Bundle (.zip)
+            <Download className="h-4 w-4 mr-2" /> Download Source (.zip)
           </Button>
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            Includes script, supporting files, logo, and Windows launcher (run.bat).
-          </p>
         </div>
       </CardContent>
     </Card>

@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
+import { buildExe } from "../lib/exeBuilder";
 
 const UPLOAD_ROOT = path.resolve(process.cwd(), "uploads", "scripts");
 
@@ -268,6 +269,87 @@ router.get("/scripts/:id/download", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Error building download");
     if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Build & download as EXE (any user with access).
+// Returns a single .exe when there are no supporting files,
+// otherwise a .zip containing the .exe and the supporting files.
+router.get("/scripts/:id/exe", requireAuth, async (req, res) => {
+  let cleanup: (() => Promise<void>) | null = null;
+  try {
+    const ctx = await loadScriptOrDeny(req, res, false);
+    if (!ctx) return;
+    const script = ctx.script;
+    const supporting = (script.supportingFiles ?? []) as Array<{ name: string; path: string; size: number }>;
+
+    const baseName = (script.filename || "script.py").replace(/\.py$/i, "") || "script";
+    const safeBase = baseName.replace(/[^A-Za-z0-9._\- ]/g, "_") || "script";
+
+    // Resolve absolute supporting file paths.
+    const supportAbs = supporting
+      .map((f) => ({ name: f.name, absPath: path.resolve(process.cwd(), f.path) }))
+      .filter((f) => f.absPath.startsWith(UPLOAD_ROOT) && fs.existsSync(f.absPath));
+
+    let logo: { absPath: string; filename: string } | null = null;
+    if (script.logoPath) {
+      const abs = path.resolve(process.cwd(), script.logoPath);
+      if (abs.startsWith(UPLOAD_ROOT) && fs.existsSync(abs)) {
+        logo = { absPath: abs, filename: path.basename(abs) };
+      }
+    }
+
+    const built = await buildExe({
+      scriptId: script.id,
+      scriptName: script.name,
+      scriptFilename: script.filename || "script.py",
+      scriptCode: script.code,
+      supportingFiles: supportAbs,
+      logo,
+    });
+    cleanup = built.cleanup;
+
+    await logAudit({
+      req, userId: ctx.me.clerkId, userEmail: ctx.me.email,
+      action: "script.exe.download", resourceType: "script", resourceId: ctx.id,
+      details: { hasSupportingFiles: supportAbs.length > 0 },
+    });
+
+    if (supportAbs.length === 0) {
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeBase}.exe"`);
+      const stream = fs.createReadStream(built.exePath);
+      stream.on("close", () => { cleanup?.(); });
+      stream.on("error", () => { cleanup?.(); });
+      stream.pipe(res);
+      return;
+    }
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeBase}.zip"`);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      req.log.error({ err }, "archiver error during exe bundle");
+      try { res.status(500).end(); } catch {}
+    });
+    archive.on("end", () => { cleanup?.(); });
+    archive.pipe(res);
+
+    archive.file(built.exePath, { name: `${safeBase}.exe` });
+    for (const f of supportAbs) {
+      archive.file(f.absPath, { name: f.name });
+    }
+    if (logo) {
+      archive.file(logo.absPath, { name: `logo${path.extname(logo.absPath)}` });
+    }
+    const readme = `# ${script.name}\r\n\r\nDouble-click ${safeBase}.exe to run. Python must be installed on the target machine.\r\nSupporting files in this folder are made available to the script when it runs.\r\n`;
+    archive.append(readme, { name: "README.txt" });
+
+    await archive.finalize();
+  } catch (err) {
+    req.log.error({ err }, "Error building EXE");
+    if (cleanup) await cleanup();
+    if (!res.headersSent) res.status(500).json({ error: (err as Error).message || "Internal server error" });
   }
 });
 
