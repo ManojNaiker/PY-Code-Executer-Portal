@@ -121,11 +121,22 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
 
   // Logo file inside bundle/ — preserve the original filename so scripts that
   // reference a specific logo file (e.g. `alfresco_logo.ico`) can find it.
+  // If the logo is a PNG, we also write a companion `.ico` with the same
+  // basename so scripts that hard-code an `.ico` filename work without the
+  // admin needing to upload an extra file.
   let logoFilename = "";
   if (opts.logo) {
     const safeLogo = path.basename(opts.logo.filename).replace(/[^A-Za-z0-9._\- ]/g, "_") || `logo${path.extname(opts.logo.filename) || ".png"}`;
     logoFilename = safeLogo;
-    await fsp.copyFile(opts.logo.absPath, path.join(bundleDir, logoFilename));
+    const logoBytes = await fsp.readFile(opts.logo.absPath);
+    await fsp.writeFile(path.join(bundleDir, logoFilename), logoBytes);
+
+    const isPng = logoBytes.length >= 8 && logoBytes.slice(1, 4).toString() === "PNG";
+    const ext = path.extname(logoFilename).toLowerCase();
+    if (isPng && ext !== ".ico") {
+      const icoCompanion = logoFilename.slice(0, logoFilename.length - ext.length) + ".ico";
+      await fsp.writeFile(path.join(bundleDir, icoCompanion), pngToIco(logoBytes));
+    }
   }
 
   // 3. Generate assets.go with build-time constants.

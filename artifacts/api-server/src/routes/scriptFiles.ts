@@ -81,8 +81,9 @@ router.post("/scripts/:id/logo", requireAuth, upload.single("file"), async (req,
     const existing = await fsp.readdir(logoDir(ctx.id)).catch(() => []);
     await Promise.all(existing.map(f => fsp.unlink(path.join(logoDir(ctx.id), f)).catch(() => {})));
 
-    const ext = path.extname(req.file.originalname) || ".png";
-    const fname = `logo${ext}`;
+    // Preserve the original filename so scripts referencing a specific name
+    // (e.g. `alfresco_logo.ico`) find it inside the EXE bundle.
+    const fname = safeBaseName(req.file.originalname) || `logo${path.extname(req.file.originalname) || ".png"}`;
     const filepath = path.join(logoDir(ctx.id), fname);
     await fsp.writeFile(filepath, req.file.buffer);
 
