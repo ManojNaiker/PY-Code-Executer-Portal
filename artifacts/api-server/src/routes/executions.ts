@@ -263,12 +263,22 @@ router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), a
 
   let finalArgs = [...args.map(String)];
   let uploadedFilePath: string | null = null;
+  const FILE_PATH_SENTINEL = "__PYEXEC_UPLOADED_FILE_PATH__";
   if (file?.buffer && file?.originalname) {
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
     uploadedFilePath = path.join(tmpDir, safeName);
     await fs.writeFile(uploadedFilePath, file.buffer);
-    if (!useShim) finalArgs.push(uploadedFilePath);
     send({ type: "status", message: `Saved uploaded file: ${safeName}` });
+    // If the frontend marked an interactive prompt slot for the file path,
+    // substitute the sentinel in stdin and skip argv-append.
+    const stdinHasSentinel = typeof stdin === "string" && stdin.includes(FILE_PATH_SENTINEL);
+    if (stdinHasSentinel) {
+      stdin = (stdin as string).split(FILE_PATH_SENTINEL).join(uploadedFilePath);
+      send({ type: "status", message: "Injecting uploaded file path into interactive prompt." });
+    } else if (!useShim) {
+      // Legacy path: append to argv for scripts that read sys.argv[1].
+      finalArgs.push(uploadedFilePath);
+    }
   }
 
   send({ type: "status", message: "Checking Python dependencies..." });

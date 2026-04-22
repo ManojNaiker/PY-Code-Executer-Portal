@@ -278,10 +278,26 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     return out;
   }
 
+  // Identify which interactive input() prompt is asking for the uploaded file's path,
+  // so we can hide that text field and inject the path automatically.
+  const FILE_PATH_SENTINEL = "__PYEXEC_UPLOADED_FILE_PATH__";
+  const filePromptIndex = (() => {
+    if (!schema || !schema.file) return -1;
+    return schema.inputs.findIndex((i) =>
+      /file|path|excel|csv|xlsx|xls|sheet|workbook|image|json/i.test(i.prompt),
+    );
+  })();
+
   function buildStdin(): string | null {
     if (!schema) return null;
     const lines: string[] = [];
-    for (const v of inputValues) lines.push(v);
+    for (let i = 0; i < inputValues.length; i++) {
+      if (i === filePromptIndex && file) {
+        lines.push(FILE_PATH_SENTINEL);
+      } else {
+        lines.push(inputValues[i] ?? "");
+      }
+    }
     if (extraStdin) lines.push(extraStdin);
     if (lines.length === 0) return null;
     // Each input() call reads one line
@@ -381,6 +397,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       return `Please upload: ${schema.file.label}`;
     }
     for (let i = 0; i < (schema.inputs?.length ?? 0); i++) {
+      // The file-path prompt is auto-filled from the upload; skip its text validation.
+      if (i === filePromptIndex && file) continue;
       if (!(inputValues[i] ?? "").length) {
         return `Please answer prompt: "${schema.inputs[i].prompt}"`;
       }
@@ -771,26 +789,42 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 <p className="text-xs text-muted-foreground -mt-2">
                   The script asks for input. Fill each prompt below — values will be sent in order.
                 </p>
-                {schema.inputs.map((inp, idx) => (
+                {schema.inputs.map((inp, idx) => {
+                  const isFileSlot = idx === filePromptIndex;
+                  return (
                   <div key={idx} className="space-y-1.5">
                     <Label htmlFor={`input-${idx}`} className="flex items-center gap-2">
                       {inp.prompt || `Prompt ${idx + 1}`}
                       <span className="text-destructive text-xs">*</span>
                       {inp.secret && <Badge variant="outline" className="text-[10px]">password</Badge>}
+                      {isFileSlot && (
+                        <Badge variant="secondary" className="text-[10px] gap-1">
+                          <Upload className="h-3 w-3" /> Auto-filled from upload
+                        </Badge>
+                      )}
                     </Label>
-                    <Input
-                      id={`input-${idx}`}
-                      type={inp.secret ? "password" : "text"}
-                      value={inputValues[idx] ?? ""}
-                      onChange={(e) => {
-                        const next = [...inputValues];
-                        next[idx] = e.target.value;
-                        setInputValues(next);
-                      }}
-                      placeholder="Type your answer..."
-                    />
+                    {isFileSlot ? (
+                      <div className="text-xs px-3 py-2 rounded-md border border-dashed bg-muted/30 text-muted-foreground">
+                        {file
+                          ? <>The path of your uploaded file <span className="font-mono">{file.name}</span> will be sent here automatically.</>
+                          : <>Upload a file in the section below — its path will be sent in answer to this prompt.</>}
+                      </div>
+                    ) : (
+                      <Input
+                        id={`input-${idx}`}
+                        type={inp.secret ? "password" : "text"}
+                        value={inputValues[idx] ?? ""}
+                        onChange={(e) => {
+                          const next = [...inputValues];
+                          next[idx] = e.target.value;
+                          setInputValues(next);
+                        }}
+                        placeholder="Type your answer..."
+                      />
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
