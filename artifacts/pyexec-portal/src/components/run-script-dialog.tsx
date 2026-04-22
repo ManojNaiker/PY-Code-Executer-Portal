@@ -147,6 +147,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [depsLoading, setDepsLoading] = useState(false);
   const [installingDeps, setInstallingDeps] = useState(false);
   const [aiSchema, setAiSchema] = useState<AiSchema>(null);
+  const [liveLog, setLiveLog] = useState<Array<{ type: "stdout" | "stderr" | "status"; text: string }>>([]);
 
   function findFieldHint(label: string): AiHint | undefined {
     return aiSchema?.fields?.find((h) => h.label === label);
@@ -182,6 +183,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setResult(null);
       setDeps(null);
       setAiSchema(null);
+      setLiveLog([]);
       return;
     }
     setDepsLoading(true);
@@ -267,6 +269,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   async function executeNow(opts?: { skipFile?: boolean }) {
     setRunning(true);
     setResult(null);
+    setLiveLog([]);
     try {
       const args = buildArgsList();
       const stdin = buildStdin();
@@ -280,13 +283,13 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
         fd.append("args", JSON.stringify(args));
         if (stdin) fd.append("stdin", stdin);
         if (tkInputsPayload) fd.append("tkInputs", JSON.stringify(tkInputsPayload));
-        res = await fetch(`/api/scripts/${scriptId}/execute`, {
+        res = await fetch(`/api/scripts/${scriptId}/execute-stream`, {
           method: "POST",
           credentials: "include",
           body: fd,
         });
       } else {
-        res = await fetch(`/api/scripts/${scriptId}/execute`, {
+        res = await fetch(`/api/scripts/${scriptId}/execute-stream`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -297,13 +300,46 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
           }),
         });
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: ExecResult = await res.json();
-      setResult(data);
-      if (data.success) {
-        toast({ title: "Execution completed" });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: ExecResult | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineIdx).trim();
+          buffer = buffer.slice(newlineIdx + 1);
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.type === "stdout" || evt.type === "stderr") {
+              setLiveLog((prev) => [...prev, { type: evt.type, text: String(evt.data ?? "") }]);
+            } else if (evt.type === "status") {
+              setLiveLog((prev) => [...prev, { type: "status", text: String(evt.message ?? "") }]);
+            } else if (evt.type === "done") {
+              finalResult = evt.result as ExecResult;
+            }
+          } catch {
+            // Ignore malformed line
+          }
+        }
+      }
+
+      if (finalResult) {
+        setResult(finalResult);
+        if (finalResult.success) {
+          toast({ title: "Execution completed" });
+        } else {
+          toast({ title: "Execution failed", description: `Exit code ${finalResult.exitCode}`, variant: "destructive" });
+        }
       } else {
-        toast({ title: "Execution failed", description: `Exit code ${data.exitCode}`, variant: "destructive" });
+        toast({ title: "Execution ended without final result", variant: "destructive" });
       }
     } catch (e) {
       toast({ title: "Failed to execute", description: String(e), variant: "destructive" });
@@ -780,6 +816,52 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 />
               </div>
             )}
+          </div>
+        )}
+
+        {(running || liveLog.length > 0) && (
+          <div className="rounded-md border border-primary/30 bg-card p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              {running ? (
+                <Loader2 className="h-4 w-4 text-primary animate-spin" />
+              ) : (
+                <Terminal className="h-4 w-4 text-primary" />
+              )}
+              <span className="text-sm font-semibold">
+                {running ? "Live Execution Log" : "Execution Log"}
+              </span>
+              {running && (
+                <Badge variant="outline" className="ml-auto text-[10px] gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Streaming
+                </Badge>
+              )}
+            </div>
+            <div
+              ref={(el) => {
+                if (el) el.scrollTop = el.scrollHeight;
+              }}
+              className="bg-black rounded p-3 font-mono text-xs max-h-72 overflow-auto whitespace-pre-wrap break-all"
+            >
+              {liveLog.length === 0 ? (
+                <span className="text-muted-foreground italic">Waiting for output...</span>
+              ) : (
+                liveLog.map((entry, i) => (
+                  <span
+                    key={i}
+                    className={
+                      entry.type === "stderr"
+                        ? "text-red-400"
+                        : entry.type === "status"
+                          ? "text-cyan-400 italic"
+                          : "text-green-400"
+                    }
+                  >
+                    {entry.type === "status" ? `[*] ${entry.text}\n` : entry.text}
+                  </span>
+                ))
+              )}
+            </div>
           </div>
         )}
 

@@ -189,6 +189,213 @@ router.post("/scripts/:id/dependencies/install", requireAuth, async (req, res) =
   }
 });
 
+router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), async (req, res) => {
+  const userId = (req as any).userId as string;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  let me: any;
+  let script: any;
+  try {
+    me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!me) return res.status(401).json({ error: "User not found" });
+    script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    if (!script) return res.status(404).json({ error: "Script not found" });
+    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+      await logAudit({ req, userId, userEmail: me.email, action: "script.execute_denied", resourceType: "script", resourceId: id });
+      return res.status(403).json({ error: "Access denied" });
+    }
+  } catch (err) {
+    req.log.error({ err }, "Auth error in execute-stream");
+    return res.status(500).json({ error: "Internal server error" });
+  }
+
+  // Parse inputs (same logic as /execute)
+  let args: string[] = [];
+  let stdin: string | null | undefined = undefined;
+  let tkInputs: { fields?: Record<string, string>; action?: string } | null = null;
+  const file = (req as any).file as { buffer: Buffer; originalname: string } | undefined;
+  const parseTk = (raw: unknown) => {
+    if (!raw) return null;
+    try {
+      const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (obj && typeof obj === "object") {
+        return {
+          fields: (obj as any).fields && typeof (obj as any).fields === "object" ? (obj as any).fields : {},
+          action: typeof (obj as any).action === "string" ? (obj as any).action : "",
+        };
+      }
+    } catch { /* ignore */ }
+    return null;
+  };
+  if (file) {
+    const rawArgs = (req.body?.args ?? "[]");
+    try { args = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs; }
+    catch { args = []; }
+    stdin = req.body?.stdin || null;
+    tkInputs = parseTk(req.body?.tkInputs);
+  } else {
+    args = req.body?.args ?? [];
+    stdin = req.body?.stdin ?? null;
+    tkInputs = parseTk(req.body?.tkInputs);
+  }
+  if (!Array.isArray(args)) args = [];
+
+  // Setup NDJSON streaming response
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const send = (obj: any) => {
+    if (!res.writableEnded) res.write(JSON.stringify(obj) + "\n");
+  };
+
+  await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name, hasFile: !!file, gui: !!tkInputs, streaming: true } });
+
+  send({ type: "status", message: "Preparing execution environment..." });
+
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pyexec-"));
+  const useShim = !!tkInputs;
+  const finalCode = useShim ? `${tkShimSource}\n# === USER SCRIPT ===\n${script.code}` : script.code;
+  const scriptPath = path.join(tmpDir, "script.py");
+  await fs.writeFile(scriptPath, finalCode, "utf-8");
+
+  let finalArgs = [...args.map(String)];
+  let uploadedFilePath: string | null = null;
+  if (file?.buffer && file?.originalname) {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    uploadedFilePath = path.join(tmpDir, safeName);
+    await fs.writeFile(uploadedFilePath, file.buffer);
+    if (!useShim) finalArgs.push(uploadedFilePath);
+    send({ type: "status", message: `Saved uploaded file: ${safeName}` });
+  }
+
+  send({ type: "status", message: "Checking Python dependencies..." });
+  const deps = await ensureDependencies(script.code);
+  if (deps.installed.length > 0) {
+    send({ type: "status", message: `Installed packages: ${deps.installed.join(", ")}` });
+  }
+  if (deps.failed.length > 0) {
+    for (const f of deps.failed) {
+      send({ type: "stderr", data: `[deps] Failed to install ${f.pkg}: ${f.error.slice(0, 200)}\n` });
+    }
+  }
+
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: os.tmpdir(),
+    TMPDIR: os.tmpdir(),
+    PYTHONPATH: getDepsDir(),
+    PYTHONUNBUFFERED: "1",
+  };
+  if (useShim) {
+    env.PYEXEC_TK_INPUTS = JSON.stringify({
+      fields: tkInputs?.fields ?? {},
+      action: tkInputs?.action ?? "",
+      file: uploadedFilePath ?? "",
+    });
+    if (uploadedFilePath) env.PYEXEC_TK_FILE = uploadedFilePath;
+  }
+
+  send({ type: "status", message: `Running: python3 script.py ${finalArgs.join(" ")}`.trim() });
+
+  const start = Date.now();
+  const proc = spawn("python3", ["-u", scriptPath, ...finalArgs], {
+    timeout: 60000,
+    env,
+    cwd: tmpDir,
+  });
+
+  let stdoutBuf = "";
+  let stderrBuf = "";
+
+  proc.stdout.on("data", (d: Buffer) => {
+    const s = d.toString();
+    stdoutBuf += s;
+    send({ type: "stdout", data: s });
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    const s = d.toString();
+    stderrBuf += s;
+    send({ type: "stderr", data: s });
+  });
+
+  if (stdin) {
+    proc.stdin.write(stdin);
+    proc.stdin.end();
+  } else {
+    proc.stdin.end();
+  }
+
+  let clientClosed = false;
+  req.on("close", () => {
+    clientClosed = true;
+    if (proc.exitCode === null && !proc.killed) {
+      proc.kill("SIGTERM");
+    }
+  });
+
+  proc.on("error", async (err: Error) => {
+    const executionTimeMs = Date.now() - start;
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    send({ type: "stderr", data: `[runtime] ${err.message}\n` });
+    send({
+      type: "done",
+      result: {
+        success: false,
+        stdout: stdoutBuf.slice(0, 50000),
+        stderr: (stderrBuf + err.message).slice(0, 10000),
+        exitCode: -1,
+        executionTimeMs,
+        executionId: null,
+        deps,
+      },
+    });
+    if (!res.writableEnded) res.end();
+  });
+
+  proc.on("close", async (code: number | null) => {
+    const executionTimeMs = Date.now() - start;
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    let executionId: number | null = null;
+    try {
+      const [execution] = await db.insert(executionsTable).values({
+        scriptId: id,
+        executedBy: userId,
+        success: code === 0,
+        stdout: stdoutBuf.slice(0, 50000),
+        stderr: stderrBuf.slice(0, 10000),
+        exitCode: code ?? -1,
+        executionTimeMs,
+      }).returning();
+      executionId = execution.id;
+      await logAudit({
+        req, userId, userEmail: me.email,
+        action: code === 0 ? "script.execute_success" : "script.execute_failure",
+        resourceType: "script", resourceId: id,
+        details: { scriptName: script.name, exitCode: code ?? -1, executionTimeMs },
+      });
+    } catch (e: any) {
+      req.log.error({ err: e }, "Failed to record execution");
+    }
+    if (clientClosed) return;
+    send({
+      type: "done",
+      result: {
+        success: code === 0,
+        stdout: stdoutBuf.slice(0, 50000),
+        stderr: stderrBuf.slice(0, 10000),
+        exitCode: code ?? -1,
+        executionTimeMs,
+        executionId,
+        deps,
+      },
+    });
+    if (!res.writableEnded) res.end();
+  });
+});
+
 router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (req, res) => {
   const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
