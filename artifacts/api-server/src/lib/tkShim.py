@@ -196,6 +196,14 @@ class _Widget:
     def tkraise(self, *a, **k): pass
     def __setitem__(self, k, v): self.configure(**{k: v})
     def __getitem__(self, k): return self.cget(k)
+    # Catch-all for Canvas methods (create_oval/rectangle/line/text/image/...),
+    # itemconfig, tag_*, mark_*, image_*, window_*, etc. Any unknown attribute
+    # becomes a no-op callable that returns 0 (so item-id assignments work).
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        def _noop(*a, **k): return 0
+        return _noop
 
 class _Label(_Widget):
     def __init__(self, master=None, *args, **kw):
@@ -316,6 +324,17 @@ _mb.askquestion = lambda *a, **k: "yes"
 _mb.askretrycancel = lambda *a, **k: False
 _mb.askyesnocancel = lambda *a, **k: True
 
+_st = _mod("tkinter.scrolledtext")
+_st.ScrolledText = _Widget
+
+_dnd = _mod("tkinter.dnd")
+_cc = _mod("tkinter.colorchooser")
+_cc.askcolor = lambda *a, **k: ((0, 0, 0), "#000000")
+_fnt = _mod("tkinter.font")
+_fnt.Font = _Widget
+_fnt.families = lambda *a, **k: []
+_fnt.nametofont = lambda *a, **k: _Widget()
+
 _sd = _mod("tkinter.simpledialog")
 def _ask_str(title="", prompt="", **k):
     v = _lookup(prompt, title)
@@ -336,6 +355,9 @@ _tk.ttk = _ttk
 _tk.filedialog = _fd
 _tk.messagebox = _mb
 _tk.simpledialog = _sd
+_tk.scrolledtext = _st
+_tk.font = _fnt
+_tk.colorchooser = _cc
 
 # Register modules — overrides the real tkinter so user code uses our stubs
 for name, mod in [
@@ -344,8 +366,10 @@ for name, mod in [
     ("tkinter.filedialog", _fd),
     ("tkinter.messagebox", _mb),
     ("tkinter.simpledialog", _sd),
-    ("tkinter.font", _mod("tkinter.font")),
-    ("tkinter.colorchooser", _mod("tkinter.colorchooser")),
+    ("tkinter.scrolledtext", _st),
+    ("tkinter.font", _fnt),
+    ("tkinter.colorchooser", _cc),
+    ("tkinter.dnd", _dnd),
     # legacy py2 names some scripts still use
     ("Tkinter", _tk),
     ("ttk", _ttk),
