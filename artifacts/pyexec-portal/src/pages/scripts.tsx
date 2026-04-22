@@ -72,33 +72,9 @@ export default function ScriptsList() {
       const r = await fetch(`/api/scripts/${script.id}/inputs`, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const schema = await r.json();
-      const hasInputs =
-        schema.args.length > 0 || schema.needsStdin || schema.file != null;
-
-      if (hasInputs) {
-        setRunTarget({ id: script.id, name: script.name, initialSchema: schema });
-        return;
-      }
-      // No inputs needed → execute immediately, then show result-only dialog
-      const exec = await fetch(`/api/scripts/${script.id}/execute`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args: [], stdin: null }),
-      });
-      if (!exec.ok) throw new Error(`HTTP ${exec.status}`);
-      const result = await exec.json();
-      toast({
-        title: result.success ? "Execution completed" : "Execution failed",
-        description: result.success ? undefined : `Exit code ${result.exitCode}`,
-        variant: result.success ? "default" : "destructive",
-      });
-      setRunTarget({
-        id: script.id,
-        name: script.name,
-        initialResult: result,
-        initialSchema: schema,
-      });
+      // Always open the dialog so the user sees the live log stream,
+      // even for scripts that need no inputs (the dialog auto-executes those).
+      setRunTarget({ id: script.id, name: script.name, initialSchema: schema });
     } catch (e) {
       toast({
         title: "Failed to run script",

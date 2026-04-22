@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -227,6 +227,28 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     schema.tkForm.actions.length > 0 ||
     schema.tkForm.needsFile
   );
+
+  // Auto-execute when dialog opens for a script that requires no user input.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      autoRanRef.current = false;
+      return;
+    }
+    if (autoRanRef.current) return;
+    if (!schema || loadingSchema) return;
+    if (running || result) return;
+    const needsAnyInput =
+      schema.args.length > 0 ||
+      schema.needsStdin ||
+      schema.inputs.length > 0 ||
+      schema.file != null ||
+      hasTkForm;
+    if (!needsAnyInput) {
+      autoRanRef.current = true;
+      executeNow();
+    }
+  }, [open, schema, loadingSchema, running, result, hasTkForm]);
 
   const hasInputs = !!schema && (
     schema.args.length > 0 ||
