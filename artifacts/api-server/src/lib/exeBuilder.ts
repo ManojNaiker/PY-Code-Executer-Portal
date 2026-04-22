@@ -184,7 +184,7 @@ func init() {
     GOCACHE: path.join(GO_CACHE, "build-cache"),
     GOMODCACHE: path.join(GO_CACHE, "mod"),
   };
-  const result = await runCmd("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", "output.exe", "."], {
+  const result = await runCmd("go", ["build", "-trimpath", "-ldflags=-s -w -H windowsgui", "-o", "output.exe", "."], {
     cwd: buildDir,
     env,
     timeoutMs: 180_000,
