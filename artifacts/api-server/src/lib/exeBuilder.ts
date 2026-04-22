@@ -109,33 +109,55 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
   const safeFilename = (opts.scriptFilename || "script.py").replace(/[^A-Za-z0-9._\- ]/g, "_") || "script.py";
   await fsp.writeFile(path.join(bundleDir, safeFilename), opts.scriptCode, "utf8");
 
-  // Supporting files inside bundle/files/<name>
-  const filesDir = path.join(bundleDir, "files");
-  if (opts.supportingFiles.length > 0) {
-    await fsp.mkdir(filesDir, { recursive: true });
-    for (const f of opts.supportingFiles) {
-      const safeName = path.basename(f.name).replace(/[^A-Za-z0-9._\- ]/g, "_");
-      await fsp.copyFile(f.absPath, path.join(filesDir, safeName));
-    }
+  // Supporting files placed flat in bundle/ so scripts that open files by
+  // a bare relative path (e.g. open("data.csv")) find them next to the script.
+  const supportingByName = new Map<string, string>();
+  for (const f of opts.supportingFiles) {
+    const safeName = path.basename(f.name).replace(/[^A-Za-z0-9._\- ]/g, "_");
+    await fsp.copyFile(f.absPath, path.join(bundleDir, safeName));
+    supportingByName.set(safeName.toLowerCase(), safeName);
   }
 
   // Logo file inside bundle/ — preserve the original filename so scripts that
   // reference a specific logo file (e.g. `alfresco_logo.ico`) can find it.
-  // If the logo is a PNG, we also write a companion `.ico` with the same
-  // basename so scripts that hard-code an `.ico` filename work without the
-  // admin needing to upload an extra file.
   let logoFilename = "";
+  let logoBytes: Buffer | null = null;
+  let logoIsPng = false;
   if (opts.logo) {
     const safeLogo = path.basename(opts.logo.filename).replace(/[^A-Za-z0-9._\- ]/g, "_") || `logo${path.extname(opts.logo.filename) || ".png"}`;
     logoFilename = safeLogo;
-    const logoBytes = await fsp.readFile(opts.logo.absPath);
+    logoBytes = await fsp.readFile(opts.logo.absPath);
+    logoIsPng = logoBytes.length >= 8 && logoBytes.slice(1, 4).toString() === "PNG";
     await fsp.writeFile(path.join(bundleDir, logoFilename), logoBytes);
 
-    const isPng = logoBytes.length >= 8 && logoBytes.slice(1, 4).toString() === "PNG";
+    // Companion .ico for scripts that hard-code an .ico filename when admin uploaded a PNG.
     const ext = path.extname(logoFilename).toLowerCase();
-    if (isPng && ext !== ".ico") {
+    if (logoIsPng && ext !== ".ico") {
       const icoCompanion = logoFilename.slice(0, logoFilename.length - ext.length) + ".ico";
       await fsp.writeFile(path.join(bundleDir, icoCompanion), pngToIco(logoBytes));
+    }
+  }
+
+  // 2b. Scan the script for hard-coded relative filenames and ensure each one
+  // exists in the bundle. Logo-like extensions are filled with the uploaded
+  // logo (converted to ICO when needed). Other files get a sample placeholder
+  // so the script does not crash on FileNotFoundError; the user can replace
+  // them with their real data afterwards.
+  const referenced = detectReferencedFilenames(opts.scriptCode);
+  const LOGO_EXTS = new Set([".ico", ".png", ".jpg", ".jpeg", ".bmp", ".gif"]);
+  for (const fname of referenced) {
+    const target = path.join(bundleDir, fname);
+    if (fs.existsSync(target)) continue; // already provided (script, logo, supporting file)
+    const ext = path.extname(fname).toLowerCase();
+    if (LOGO_EXTS.has(ext) && logoBytes) {
+      if (ext === ".ico") {
+        await fsp.writeFile(target, logoIsPng ? pngToIco(logoBytes) : logoBytes);
+      } else {
+        await fsp.writeFile(target, logoBytes);
+      }
+    } else {
+      const sample = sampleForExtension(ext, fname, opts.scriptName);
+      if (sample !== null) await fsp.writeFile(target, sample);
     }
   }
 
@@ -202,4 +224,110 @@ func init() {
       await fsp.rm(buildDir, { recursive: true, force: true }).catch(() => {});
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Filename detection: pull bare relative filenames out of the script source.
+// ---------------------------------------------------------------------------
+
+const ALLOWED_EXTS = new Set([
+  ".ico", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg",
+  ".csv", ".tsv", ".txt", ".log", ".md",
+  ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+  ".xlsx", ".xls", ".xlsm", ".xlsb",
+  ".docx", ".doc", ".pdf", ".rtf",
+  ".pptx", ".ppt",
+  ".db", ".sqlite", ".sqlite3",
+  ".html", ".htm", ".xml",
+  ".pem", ".crt", ".key",
+  ".bat", ".sh", ".ps1",
+  ".zip",
+]);
+
+const SKIP_NAMES = new Set([
+  "requirements.txt", "readme.md", "license", "license.txt",
+  "setup.py", "setup.cfg", "pyproject.toml", "manifest.in",
+  ".gitignore", "package.json", "tsconfig.json",
+]);
+
+export function detectReferencedFilenames(code: string): string[] {
+  const out = new Set<string>();
+  const re = /['"]([A-Za-z0-9_\-. ]{1,200})['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    const raw = m[1].trim();
+    if (!raw || raw.length > 120) continue;
+    if (raw.includes("/") || raw.includes("\\")) continue;
+    const dot = raw.lastIndexOf(".");
+    if (dot <= 0 || dot === raw.length - 1) continue;
+    const ext = raw.slice(dot).toLowerCase();
+    if (!ALLOWED_EXTS.has(ext)) continue;
+    if (SKIP_NAMES.has(raw.toLowerCase())) continue;
+    // Skip pure version strings, urls, and mime-style "image/png" already filtered by separator check.
+    if (/^\d+(\.\d+)+$/.test(raw)) continue;
+    out.add(raw);
+  }
+  return Array.from(out);
+}
+
+export function sampleForExtension(ext: string, filename: string, scriptName: string): Buffer | null {
+  const header = `# Sample placeholder generated for ${scriptName}.\n# Replace this file with your real ${filename} before running.\n`;
+  switch (ext) {
+    case ".csv":
+    case ".tsv": {
+      const sep = ext === ".tsv" ? "\t" : ",";
+      return Buffer.from(`column1${sep}column2${sep}column3\nvalue1${sep}value2${sep}value3\n`, "utf8");
+    }
+    case ".json":
+      return Buffer.from(`{\n  "_comment": "Sample placeholder for ${filename}. Replace with real data.",\n  "example": true\n}\n`, "utf8");
+    case ".yaml":
+    case ".yml":
+      return Buffer.from(`# Sample placeholder for ${filename}\nexample: true\n`, "utf8");
+    case ".toml":
+      return Buffer.from(`# Sample placeholder for ${filename}\n[example]\nkey = "value"\n`, "utf8");
+    case ".ini":
+    case ".cfg":
+    case ".conf":
+      return Buffer.from(`; Sample placeholder for ${filename}\n[default]\nkey = value\n`, "utf8");
+    case ".env":
+      return Buffer.from(`# Sample placeholder for ${filename}\nKEY=value\n`, "utf8");
+    case ".txt":
+    case ".log":
+    case ".md":
+      return Buffer.from(`${header}`, "utf8");
+    case ".html":
+    case ".htm":
+      return Buffer.from(`<!-- Sample placeholder for ${filename} -->\n<html><body><p>Replace this file with your real content.</p></body></html>\n`, "utf8");
+    case ".xml":
+      return Buffer.from(`<!-- Sample placeholder for ${filename} -->\n<root></root>\n`, "utf8");
+    case ".bat":
+      return Buffer.from(`@echo off\nrem Sample placeholder for ${filename}\n`, "utf8");
+    case ".sh":
+      return Buffer.from(`#!/usr/bin/env bash\n# Sample placeholder for ${filename}\n`, "utf8");
+    case ".ps1":
+      return Buffer.from(`# Sample placeholder for ${filename}\n`, "utf8");
+    // Binary formats we cannot meaningfully synthesize -> create a 0-byte
+    // placeholder so the file exists; user will replace it.
+    case ".xlsx":
+    case ".xls":
+    case ".xlsm":
+    case ".xlsb":
+    case ".docx":
+    case ".doc":
+    case ".pdf":
+    case ".rtf":
+    case ".pptx":
+    case ".ppt":
+    case ".db":
+    case ".sqlite":
+    case ".sqlite3":
+    case ".zip":
+    case ".pem":
+    case ".crt":
+    case ".key":
+    case ".svg":
+      return Buffer.from("", "utf8");
+    default:
+      return Buffer.from(header, "utf8");
+  }
 }
