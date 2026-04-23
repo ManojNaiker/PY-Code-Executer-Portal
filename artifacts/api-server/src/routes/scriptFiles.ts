@@ -340,11 +340,6 @@ router.get("/scripts/:id/exe", requireAuth, async (req, res) => {
     for (const f of supportAbs) {
       archive.file(f.absPath, { name: f.name });
     }
-    if (logo) {
-      archive.file(logo.absPath, { name: `logo${path.extname(logo.absPath)}` });
-    }
-    const readme = `# ${script.name}\r\n\r\nDouble-click ${safeBase}.exe to run. Python must be installed on the target machine.\r\nSupporting files in this folder are made available to the script when it runs.\r\n`;
-    archive.append(readme, { name: "README.txt" });
 
     await archive.finalize();
   } catch (err) {
