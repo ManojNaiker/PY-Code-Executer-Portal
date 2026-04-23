@@ -22,13 +22,15 @@ const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function AuthPageLayout({ children, title, subtitle }: { children: ReactNode; title: string; subtitle: string }) {
   return (
-    <div className="flex min-h-[100dvh] bg-white" style={{ fontFamily: "'Segoe UI', Inter, sans-serif" }}>
-      <div className="hidden lg:flex lg:w-[45%] flex-col justify-between p-12 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)" }}>
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute top-0 left-0 w-64 h-64 bg-yellow-300 rounded-full -translate-x-1/2 -translate-y-1/2 blur-2xl" />
-          <div className="absolute bottom-0 right-0 w-96 h-96 bg-cyan-300 rounded-full translate-x-1/4 translate-y-1/4 blur-3xl" />
-          <div className="absolute top-1/2 left-1/3 w-72 h-72 bg-pink-400 rounded-full blur-3xl" />
-        </div>
+    <div className="flex min-h-[100dvh] bg-white" style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
+      <div className="hidden lg:flex lg:w-[45%] flex-col justify-between p-12 relative overflow-hidden" style={{ background: "linear-gradient(160deg, #0b1426 0%, #122042 45%, #1d3573 100%)" }}>
+        <div className="absolute inset-0 opacity-[0.07]" style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
+          backgroundSize: "40px 40px",
+        }} />
+        <div className="absolute -top-32 -left-32 w-[28rem] h-[28rem] rounded-full blur-3xl" style={{ background: "radial-gradient(circle, rgba(96,165,250,0.35), transparent 60%)" }} />
+        <div className="absolute -bottom-40 -right-32 w-[32rem] h-[32rem] rounded-full blur-3xl" style={{ background: "radial-gradient(circle, rgba(56,189,248,0.25), transparent 60%)" }} />
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-12">
             <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-lg">
@@ -102,20 +104,20 @@ function SignInPage() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required
-            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900" />
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#1d3573] focus:ring-1 focus:ring-[#1d3573] bg-white text-gray-900" />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" required
-            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900" />
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#1d3573] focus:ring-1 focus:ring-[#1d3573] bg-white text-gray-900" />
         </div>
         <button type="submit" disabled={submitting}
-          className="w-full bg-[#0078d4] hover:bg-[#106ebe] disabled:opacity-60 text-white font-normal py-2 px-4 rounded-sm text-sm transition-colors">
+          className="w-full bg-[#1d3573] hover:bg-[#0b1426] disabled:opacity-60 text-white font-normal py-2 px-4 rounded-sm text-sm transition-colors">
           {submitting ? "Signing in..." : "Sign in"}
         </button>
         <p className="text-center text-sm text-gray-500">
           Don't have an account?{" "}
-          <Link href="/sign-up" className="text-[#0078d4] hover:underline">Sign up</Link>
+          <Link href="/sign-up" className="text-[#1d3573] hover:underline">Sign up</Link>
         </p>
       </form>
     </AuthPageLayout>
@@ -157,32 +159,32 @@ function SignUpPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
             <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
-              className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900" />
+              className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#1d3573] focus:ring-1 focus:ring-[#1d3573] bg-white text-gray-900" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
             <input type="text" value={lastName} onChange={e => setLastName(e.target.value)}
-              className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900" />
+              className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#1d3573] focus:ring-1 focus:ring-[#1d3573] bg-white text-gray-900" />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
-            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900" />
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#1d3573] focus:ring-1 focus:ring-[#1d3573] bg-white text-gray-900" />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6}
             placeholder="At least 6 characters"
-            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#0078d4] focus:ring-1 focus:ring-[#0078d4] bg-white text-gray-900" />
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-[#1d3573] focus:ring-1 focus:ring-[#1d3573] bg-white text-gray-900" />
         </div>
         <button type="submit" disabled={submitting}
-          className="w-full bg-[#0078d4] hover:bg-[#106ebe] disabled:opacity-60 text-white font-normal py-2 px-4 rounded-sm text-sm transition-colors">
+          className="w-full bg-[#1d3573] hover:bg-[#0b1426] disabled:opacity-60 text-white font-normal py-2 px-4 rounded-sm text-sm transition-colors">
           {submitting ? "Creating account..." : "Create account"}
         </button>
         <p className="text-center text-sm text-gray-500">
           Already have an account?{" "}
-          <Link href="/sign-in" className="text-[#0078d4] hover:underline">Sign in</Link>
+          <Link href="/sign-in" className="text-[#1d3573] hover:underline">Sign in</Link>
         </p>
       </form>
     </AuthPageLayout>

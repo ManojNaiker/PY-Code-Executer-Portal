@@ -68,8 +68,10 @@ export function Layout({ children }: { children: ReactNode }) {
     <SidebarProvider>
       <div className="flex min-h-screen w-full bg-background">
         <Sidebar className="border-r">
-          <SidebarHeader className="flex h-14 items-center px-4 font-bold text-lg text-primary tracking-tight">
-            <Code2 className="mr-2 h-5 w-5" />
+          <SidebarHeader className="flex h-16 items-center px-4 font-bold text-lg text-white tracking-tight border-b border-sidebar-border">
+            <div className="flex items-center justify-center h-8 w-8 rounded-md bg-sidebar-primary text-sidebar-primary-foreground mr-2.5">
+              <Code2 className="h-4 w-4" />
+            </div>
             PyExec Portal
           </SidebarHeader>
           <SidebarContent>
