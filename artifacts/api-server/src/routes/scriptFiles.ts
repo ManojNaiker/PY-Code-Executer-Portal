@@ -214,12 +214,69 @@ router.delete("/scripts/:id/supporting-files/:name", requireAuth, async (req, re
 // Download script as a ZIP bundle (any user with access)
 // Bundle contains: <script.py>, run.bat (Windows launcher), all supporting files,
 // and logo file (if present). When EXE generation is added later, the .exe replaces .py + run.bat.
-// Source download is just an alias for the EXE bundle: zip with the .exe and
-// any supporting files (no .py, logo, README, or run.bat — those are either
-// embedded in the EXE or no longer needed).
-router.get("/scripts/:id/download", requireAuth, (req, res, next) => {
-  req.url = req.url.replace(/\/download(\?|$)/, "/exe$1");
-  next();
+// Source download: always a ZIP containing the built .exe and any supporting
+// files (no .py, logo, README, or run.bat — those are either embedded in the
+// EXE or no longer needed). Unlike /exe, this endpoint always returns a zip
+// even when there are no supporting files.
+router.get("/scripts/:id/download", requireAuth, async (req, res) => {
+  let cleanup: (() => Promise<void>) | null = null;
+  try {
+    const ctx = await loadScriptOrDeny(req, res, false);
+    if (!ctx) return;
+    const script = ctx.script;
+    const supporting = (script.supportingFiles ?? []) as Array<{ name: string; path: string; size: number }>;
+
+    const baseName = (script.filename || "script.py").replace(/\.py$/i, "") || "script";
+    const safeBase = baseName.replace(/[^A-Za-z0-9._\- ]/g, "_") || "script";
+
+    const supportAbs = supporting
+      .map((f) => ({ name: f.name, absPath: path.resolve(process.cwd(), f.path) }))
+      .filter((f) => f.absPath.startsWith(UPLOAD_ROOT) && fs.existsSync(f.absPath));
+
+    let logo: { absPath: string; filename: string } | null = null;
+    if (script.logoPath) {
+      const abs = path.resolve(process.cwd(), script.logoPath);
+      if (abs.startsWith(UPLOAD_ROOT) && fs.existsSync(abs)) {
+        logo = { absPath: abs, filename: path.basename(abs) };
+      }
+    }
+
+    const built = await buildExe({
+      scriptId: script.id,
+      scriptName: script.name,
+      scriptFilename: script.filename || "script.py",
+      scriptCode: script.code,
+      supportingFiles: supportAbs,
+      logo,
+    });
+    cleanup = built.cleanup;
+
+    await logAudit({
+      req, userId: ctx.me.clerkId, userEmail: ctx.me.email,
+      action: "script.download", resourceType: "script", resourceId: ctx.id,
+    });
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeBase}.zip"`);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      req.log.error({ err }, "archiver error during download");
+      try { res.status(500).end(); } catch {}
+    });
+    archive.on("end", () => { cleanup?.(); });
+    archive.pipe(res);
+
+    archive.file(built.exePath, { name: `${safeBase}.exe` });
+    for (const f of supportAbs) {
+      archive.file(f.absPath, { name: f.name });
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    req.log.error({ err }, "Error building download");
+    if (cleanup) await cleanup();
+    if (!res.headersSent) res.status(500).json({ error: (err as Error).message || "Internal server error" });
+  }
 });
 
 // Build & download as EXE (any user with access).
