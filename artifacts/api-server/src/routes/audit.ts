@@ -10,13 +10,16 @@ const router = Router();
 router.get("/audit-logs", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
   const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
-  if (!me || me.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!me) return res.status(401).json({ error: "Unauthorized" });
 
   const page = Math.max(1, parseInt(String(req.query.page || 1)));
   const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || 50))));
   const offset = (page - 1) * limit;
   const action = req.query.action ? String(req.query.action) : undefined;
-  const filterUserId = req.query.userId ? String(req.query.userId) : undefined;
+  // Non-admins can only see their own logs; admins may filter by any userId
+  const filterUserId = me.role === "admin"
+    ? (req.query.userId ? String(req.query.userId) : undefined)
+    : userId;
 
   try {
     const conditions: any[] = [];

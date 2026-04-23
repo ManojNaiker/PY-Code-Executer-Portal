@@ -52,12 +52,18 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "";
 
-  const navItems = [
-    { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { title: "Script Mapping", href: "/script-mapping", icon: FolderTree },
-    { title: "Scripts", href: "/scripts", icon: Code2 },
-    { title: "Upload Script", href: "/upload", icon: Upload },
-  ];
+  const navItems = isAdmin
+    ? [
+        { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+        { title: "Script Mapping", href: "/script-mapping", icon: FolderTree },
+        { title: "Scripts", href: "/scripts", icon: Code2 },
+        { title: "Upload Script", href: "/upload", icon: Upload },
+      ]
+    : [
+        { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+        { title: "Scripts", href: "/scripts", icon: Code2 },
+        { title: "Audit Log", href: "/admin/audit", icon: ShieldAlert },
+      ];
 
   const adminItems = [
     { title: "Departments", href: "/admin/departments", icon: Building2 },

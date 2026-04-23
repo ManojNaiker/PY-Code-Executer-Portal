@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useListAuditLogs, getListAuditLogsQueryKey } from "@workspace/api-client-react";
+import { useListAuditLogs, getListAuditLogsQueryKey, useGetMyProfile, getGetMyProfileQueryKey } from "@workspace/api-client-react";
+import { useAuth } from "@/hooks/use-auth";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { ScrollText } from "lucide-react";
@@ -16,6 +17,12 @@ export default function AdminAudit() {
   const [actionFilter, setActionFilter] = useState("all");
   const [userFilter, setUserFilter] = useState("");
   const limit = 20;
+
+  const { user } = useAuth();
+  const { data: profile } = useGetMyProfile({
+    query: { enabled: !!user?.id, queryKey: getGetMyProfileQueryKey() }
+  });
+  const isAdmin = profile?.role === "admin";
 
   const { data, isLoading } = useListAuditLogs({
     page,
@@ -41,8 +48,8 @@ export default function AdminAudit() {
   return (
     <div>
       <PageHeader
-        title="Audit Log"
-        description="Comprehensive system activity trail."
+        title={isAdmin ? "Audit Log" : "My Activity"}
+        description={isAdmin ? "Comprehensive system activity trail." : "Your recent activity in the platform."}
         icon={<ScrollText className="h-5 w-5" />}
       />
 
@@ -62,12 +69,14 @@ export default function AdminAudit() {
           </SelectContent>
         </Select>
 
-        <Input 
-          placeholder="Filter by user clerk ID..." 
-          className="max-w-xs"
-          value={userFilter}
-          onChange={(e) => { setUserFilter(e.target.value); setPage(1); }}
-        />
+        {isAdmin && (
+          <Input
+            placeholder="Filter by user clerk ID..."
+            className="max-w-xs"
+            value={userFilter}
+            onChange={(e) => { setUserFilter(e.target.value); setPage(1); }}
+          />
+        )}
       </div>
 
       <div className="border rounded-lg overflow-hidden bg-card">
