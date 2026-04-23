@@ -25,12 +25,19 @@ export type AiActionHint = {
   description?: string;
 };
 
+export type AiPathHint = {
+  literal: string;
+  friendlyLabel?: string;
+  description?: string;
+};
+
 export type AiEnhancedSchema = {
   scriptTitle?: string;
   scriptSummary?: string;
   fields?: AiFieldHint[];
   args?: AiFieldHint[];
   actions?: AiActionHint[];
+  paths?: AiPathHint[];
   warnings?: string[];
   generatedAt: string;
 };
@@ -59,6 +66,13 @@ You MUST respond with ONLY a valid JSON object matching this TypeScript shape (n
       "label": string,             // EXACT label from input schema
       "friendlyLabel": string,     // cleaner button label
       "description": string        // what this action does in plain English
+    }
+  ],
+  "paths": [                       // one entry per detected hard-coded file path (match by exact "literal")
+    {
+      "literal": string,           // EXACT literal text from the input schema (do not change)
+      "friendlyLabel": string,     // human-friendly name for the file the user should upload (e.g. "Devices Excel file")
+      "description": string        // what this file is used for, 1 sentence
     }
   ],
   "warnings": string[]             // important things end users should know (security, side effects, network calls, deletes, etc.) — at most 3 short bullets
@@ -92,6 +106,7 @@ router.post("/scripts/:id/ai-enhance", requireAuth, async (req, res) => {
       tkFields: parsed.tkForm?.fields.map((f) => ({ label: f.label, kind: f.kind })) ?? [],
       tkActions: parsed.tkForm?.actions.map((a) => ({ label: a.label })) ?? [],
       hasFile: !!parsed.file || !!parsed.tkForm?.needsFile,
+      hardcodedPaths: parsed.hardcodedPaths.map((p) => ({ literal: p.literal, path: p.path, kind: p.kind, func: p.func })),
     };
 
     const trimmedCode = script.code.length > 12000

@@ -59,6 +59,14 @@ type TkForm = {
   fileLabel: string | null;
 } | null;
 
+type HardcodedPath = {
+  literal: string;
+  path: string;
+  kind: "excel" | "csv" | "json" | "image" | "text" | "any";
+  label: string;
+  func: string;
+};
+
 type InputsSchema = {
   args: DetectedArg[];
   inputs: DetectedInput[];
@@ -67,6 +75,7 @@ type InputsSchema = {
   file: FileSpec;
   gui: DetectedGui;
   tkForm: TkForm;
+  hardcodedPaths: HardcodedPath[];
 };
 
 type ExecResult = {
@@ -94,12 +103,14 @@ type AiHint = {
   example?: string;
 };
 type AiActionHint = { label: string; friendlyLabel?: string; description?: string };
+type AiPathHint = { literal: string; friendlyLabel?: string; description?: string };
 type AiSchema = {
   scriptTitle?: string;
   scriptSummary?: string;
   fields?: AiHint[];
   args?: AiHint[];
   actions?: AiActionHint[];
+  paths?: AiPathHint[];
   warnings?: string[];
 } | null;
 
@@ -139,6 +150,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [inputValues, setInputValues] = useState<string[]>([]);
   const [extraStdin, setExtraStdin] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [pathFiles, setPathFiles] = useState<Record<number, File>>({});
   const [tkValues, setTkValues] = useState<Record<string, string>>({});
   const [tkAction, setTkAction] = useState<string>("");
   const [running, setRunning] = useState(false);
@@ -157,6 +169,9 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   }
   function findActionHint(label: string): AiActionHint | undefined {
     return aiSchema?.actions?.find((h) => h.label === label);
+  }
+  function findPathHint(literal: string): AiPathHint | undefined {
+    return aiSchema?.paths?.find((h) => h.literal === literal);
   }
 
   function initTkValues(s: InputsSchema): Record<string, string> {
@@ -178,6 +193,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setInputValues([]);
       setExtraStdin("");
       setFile(null);
+      setPathFiles({});
       setTkValues({});
       setTkAction("");
       setResult(null);
@@ -217,7 +233,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       })
       .catch((e) => {
         toast({ title: "Failed to load script inputs", description: String(e), variant: "destructive" });
-        setSchema({ args: [], inputs: [], needsStdin: false, stdinPrompt: null, file: null, gui: null, tkForm: null });
+        setSchema({ args: [], inputs: [], needsStdin: false, stdinPrompt: null, file: null, gui: null, tkForm: null, hardcodedPaths: [] });
       })
       .finally(() => setLoadingSchema(false));
   }, [open, scriptId, initialResult, initialSchema]);
@@ -243,7 +259,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       schema.needsStdin ||
       schema.inputs.length > 0 ||
       schema.file != null ||
-      hasTkForm;
+      hasTkForm ||
+      (schema.hardcodedPaths?.length ?? 0) > 0;
     if (!needsAnyInput) {
       autoRanRef.current = true;
       executeNow();
@@ -256,7 +273,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     schema.needsStdin ||
     schema.file != null ||
     schema.gui != null ||
-    hasTkForm
+    hasTkForm ||
+    (schema.hardcodedPaths?.length ?? 0) > 0
   );
 
   function buildArgsList(): string[] {
@@ -315,12 +333,27 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
         ? { fields: tkValues, action: tkAction }
         : null;
       let res: Response;
-      if (file && !opts?.skipFile) {
+      const pathOverrideEntries = schema?.hardcodedPaths
+        ? schema.hardcodedPaths
+            .map((hp, i) => ({ hp, i, f: pathFiles[i] }))
+            .filter((x) => !!x.f)
+        : [];
+      const useForm = (file && !opts?.skipFile) || pathOverrideEntries.length > 0;
+      if (useForm) {
         const fd = new FormData();
-        fd.append("file", file);
+        if (file && !opts?.skipFile) fd.append("file", file);
         fd.append("args", JSON.stringify(args));
         if (stdin) fd.append("stdin", stdin);
         if (tkInputsPayload) fd.append("tkInputs", JSON.stringify(tkInputsPayload));
+        if (pathOverrideEntries.length > 0) {
+          fd.append(
+            "pathOverrides",
+            JSON.stringify(pathOverrideEntries.map(({ hp, i }) => ({ literal: hp.literal, index: i }))),
+          );
+          for (const { i, f } of pathOverrideEntries) {
+            fd.append(`pathFile_${i}`, f);
+          }
+        }
         res = await fetch(`/api/scripts/${scriptId}/execute-stream`, {
           method: "POST",
           credentials: "include",
@@ -408,6 +441,13 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     }
     if (schema.tkForm && schema.tkForm.actions.length > 0 && !tkAction) {
       return "Please choose an action to run.";
+    }
+    for (let i = 0; i < (schema.hardcodedPaths?.length ?? 0); i++) {
+      if (!pathFiles[i]) {
+        const hp = schema.hardcodedPaths[i];
+        const hint = findPathHint(hp.literal);
+        return `Please upload: ${hint?.friendlyLabel ?? hp.label}`;
+      }
     }
     return null;
   }
@@ -823,6 +863,60 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                       />
                     )}
                   </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {schema.hardcodedPaths && schema.hardcodedPaths.length > 0 && (
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide flex items-center gap-2">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Hard-coded File Paths
+                </div>
+                <p className="text-xs text-muted-foreground -mt-2">
+                  This script references files by absolute path that won't exist on the server. Upload a replacement for each one — the path in the script will be rewritten to point at your upload.
+                </p>
+                {schema.hardcodedPaths.map((hp, i) => {
+                  const hint = findPathHint(hp.literal);
+                  const f = pathFiles[i];
+                  return (
+                    <div key={i} className="space-y-2 p-4 rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5">
+                      <Label className="flex items-center gap-2 font-semibold">
+                        <FileSpreadsheet className="h-4 w-4 text-amber-600" />
+                        {hint?.friendlyLabel ?? hp.label}
+                        <span className="text-destructive text-xs">*</span>
+                        <Badge variant="outline" className="text-[10px]">{hp.kind}</Badge>
+                        <Badge variant="secondary" className="text-[10px] font-mono">{hp.func}()</Badge>
+                        {hint && <Sparkles className="h-3 w-3 text-purple-500" />}
+                      </Label>
+                      {hint?.description && (
+                        <p className="text-xs text-muted-foreground">{hint.description}</p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">
+                        Original path in script: <span className="font-mono break-all">{hp.path}</span>
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="file"
+                          accept={ACCEPT_BY_KIND[hp.kind] ?? "*"}
+                          onChange={(e) => {
+                            const next = { ...pathFiles };
+                            const sel = e.target.files?.[0];
+                            if (sel) next[i] = sel;
+                            else delete next[i];
+                            setPathFiles(next);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        {f && (
+                          <Badge variant="secondary" className="shrink-0 gap-1">
+                            <Upload className="h-3 w-3" />
+                            {(f.size / 1024).toFixed(1)} KB
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

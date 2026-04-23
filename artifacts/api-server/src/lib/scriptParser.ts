@@ -46,6 +46,14 @@ export type TkForm = {
   fileLabel: string | null;
 } | null;
 
+export type HardcodedPath = {
+  literal: string;
+  path: string;
+  kind: "excel" | "csv" | "json" | "image" | "text" | "any";
+  label: string;
+  func: string;
+};
+
 export type ScriptInputsSchema = {
   args: DetectedArg[];
   inputs: DetectedInput[];
@@ -54,6 +62,7 @@ export type ScriptInputsSchema = {
   file: DetectedFile;
   gui: DetectedGui;
   tkForm: TkForm;
+  hardcodedPaths: HardcodedPath[];
 };
 
 function humanizeName(raw: string): string {
@@ -316,7 +325,124 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
     ? parseTkinterForm(code)
     : null;
 
-  return { args, inputs, needsStdin, stdinPrompt, file, gui, tkForm };
+  const hardcodedPaths = detectHardcodedPaths(code);
+
+  return { args, inputs, needsStdin, stdinPrompt, file, gui, tkForm, hardcodedPaths };
+}
+
+// ----------------------------------------------------------------
+// Hard-coded file path detection
+// ----------------------------------------------------------------
+
+function decodePythonStringLiteral(literal: string): string | null {
+  const t = literal.trim();
+  // Raw string: r"..." or r'...'
+  if (/^[rR]['"]/.test(t)) {
+    const q = t[1];
+    if (!t.endsWith(q)) return null;
+    return t.slice(2, -1);
+  }
+  if (t.startsWith('"') || t.startsWith("'")) {
+    const q = t[0];
+    if (!t.endsWith(q)) return null;
+    const inner = t.slice(1, -1);
+    return inner
+      .replace(/\\\\/g, "\\")
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\r/g, "\r")
+      .replace(/\\'/g, "'")
+      .replace(/\\"/g, '"');
+  }
+  return null;
+}
+
+function looksLikePath(value: string): boolean {
+  if (!value) return false;
+  // Windows drive letter (e.g. E:\ or C:/) or absolute UNIX path or relative path with extension
+  return (
+    /^[a-zA-Z]:[\\/]/.test(value) ||
+    value.startsWith("/") ||
+    value.startsWith("./") ||
+    value.startsWith("../") ||
+    value.startsWith("\\\\") ||
+    /\.[a-zA-Z0-9]{1,5}$/.test(value)
+  );
+}
+
+function basenameOf(p: string): string {
+  const parts = p.split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+function detectHardcodedPaths(code: string): HardcodedPath[] {
+  const out: HardcodedPath[] = [];
+  const seen = new Set<string>();
+
+  type FuncSpec = {
+    pattern: RegExp;
+    kind: HardcodedPath["kind"];
+    func: string;
+  };
+
+  const callSpecs: FuncSpec[] = [
+    { pattern: /(?:[\w.]*\.)?read_excel\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "read_excel" },
+    { pattern: /(?:[\w.]*\.)?read_csv\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "csv", func: "read_csv" },
+    { pattern: /(?:[\w.]*\.)?load_workbook\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "load_workbook" },
+    { pattern: /xlrd\.open_workbook\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "open_workbook" },
+    { pattern: /(?:cv2|imageio)\.imread\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "image", func: "imread" },
+    { pattern: /Image\.open\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "image", func: "Image.open" },
+    { pattern: /np\.(?:loadtxt|genfromtxt)\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "text", func: "np.loadtxt" },
+  ];
+
+  for (const spec of callSpecs) {
+    let m: RegExpExecArray | null;
+    spec.pattern.lastIndex = 0;
+    while ((m = spec.pattern.exec(code))) {
+      const literal = m[1];
+      const value = decodePythonStringLiteral(literal);
+      if (!value || !looksLikePath(value)) continue;
+      const key = `${spec.func}::${literal}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        literal,
+        path: value,
+        kind: spec.kind,
+        func: spec.func,
+        label: basenameOf(value),
+      });
+    }
+  }
+
+  // open(path, ...) — only when the file extension suggests a data file
+  const openRe = /\bopen\s*\(\s*([rR]?['"][^'"\n]+['"])/g;
+  const dataExt = /\.(xlsx|xls|csv|tsv|json|txt|xml|yaml|yml|ini|conf|log|html?)$/i;
+  let om: RegExpExecArray | null;
+  while ((om = openRe.exec(code))) {
+    const literal = om[1];
+    const value = decodePythonStringLiteral(literal);
+    if (!value || !looksLikePath(value)) continue;
+    if (!dataExt.test(value)) continue;
+    const key = `open::${literal}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const ext = value.match(dataExt)?.[1].toLowerCase() ?? "";
+    let kind: HardcodedPath["kind"] = "any";
+    if (/^xlsx?$/.test(ext)) kind = "excel";
+    else if (/^(csv|tsv)$/.test(ext)) kind = "csv";
+    else if (ext === "json") kind = "json";
+    else if (/^(txt|xml|yaml|yml|ini|conf|log|html?)$/.test(ext)) kind = "text";
+    out.push({
+      literal,
+      path: value,
+      kind,
+      func: "open",
+      label: basenameOf(value),
+    });
+  }
+
+  return out;
 }
 
 // ----------------------------------------------------------------

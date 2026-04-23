@@ -10,7 +10,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import multer from "multer";
-import { parseScriptInputs } from "../lib/scriptParser";
+import { parseScriptInputs, type HardcodedPath } from "../lib/scriptParser";
 import { ensureDependencies, getDepsDir, checkDependencies, installDependencies, type DepInstallResult } from "../lib/pythonDeps";
 import tkShimSource from "../lib/tkShim.py";
 
@@ -20,6 +20,32 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
 });
+
+const uploadAny = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 20 },
+}).any();
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function applyPathOverrides(
+  code: string,
+  overrides: { literal: string; replacementPath: string }[],
+): { code: string; replaced: { literal: string; replacementPath: string }[] } {
+  let out = code;
+  const replaced: { literal: string; replacementPath: string }[] = [];
+  for (const o of overrides) {
+    const newLiteral = JSON.stringify(o.replacementPath); // safe Python string literal
+    const re = new RegExp(escapeRegExp(o.literal), "g");
+    if (re.test(out)) {
+      out = out.replace(new RegExp(escapeRegExp(o.literal), "g"), newLiteral);
+      replaced.push(o);
+    }
+  }
+  return { code: out, replaced };
+}
 
 async function runPython(
   code: string,
@@ -189,7 +215,7 @@ router.post("/scripts/:id/dependencies/install", requireAuth, async (req, res) =
   }
 });
 
-router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), async (req, res) => {
+router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, res) => {
   const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
@@ -214,7 +240,9 @@ router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), a
   let args: string[] = [];
   let stdin: string | null | undefined = undefined;
   let tkInputs: { fields?: Record<string, string>; action?: string } | null = null;
-  const file = (req as any).file as { buffer: Buffer; originalname: string } | undefined;
+  const allFiles = ((req as any).files ?? []) as Array<{ fieldname: string; buffer: Buffer; originalname: string }>;
+  const file = allFiles.find((f) => f.fieldname === "file");
+  const pathFiles = allFiles.filter((f) => f.fieldname.startsWith("pathFile_"));
   const parseTk = (raw: unknown) => {
     if (!raw) return null;
     try {
@@ -228,7 +256,8 @@ router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), a
     } catch { /* ignore */ }
     return null;
   };
-  if (file) {
+  const isMultipart = allFiles.length > 0 || (typeof req.body?.args === "string");
+  if (isMultipart) {
     const rawArgs = (req.body?.args ?? "[]");
     try { args = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs; }
     catch { args = []; }
@@ -240,6 +269,16 @@ router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), a
     tkInputs = parseTk(req.body?.tkInputs);
   }
   if (!Array.isArray(args)) args = [];
+
+  // Parse pathOverrides: [{ literal: "...", index: 0 }]
+  let pathOverridesIn: Array<{ literal: string; index: number }> = [];
+  try {
+    const raw = req.body?.pathOverrides;
+    if (raw) {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed)) pathOverridesIn = parsed;
+    }
+  } catch { /* ignore */ }
 
   // Setup NDJSON streaming response
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
@@ -256,8 +295,29 @@ router.post("/scripts/:id/execute-stream", requireAuth, upload.single("file"), a
   send({ type: "status", message: "Preparing execution environment..." });
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pyexec-"));
+
+  // Save extra path-override files and build code substitutions
+  const overrideTargets: { literal: string; replacementPath: string; label: string }[] = [];
+  for (const ov of pathOverridesIn) {
+    const f = pathFiles.find((pf) => pf.fieldname === `pathFile_${ov.index}`);
+    if (!f) continue;
+    const safeName = f.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const dest = path.join(tmpDir, `override_${ov.index}_${safeName}`);
+    await fs.writeFile(dest, f.buffer);
+    overrideTargets.push({ literal: ov.literal, replacementPath: dest, label: safeName });
+  }
+
+  let userCode = script.code;
+  if (overrideTargets.length > 0) {
+    const { code: rewritten, replaced } = applyPathOverrides(userCode, overrideTargets);
+    userCode = rewritten;
+    for (const r of replaced) {
+      send({ type: "status", message: `Replaced hard-coded path ${r.literal} → uploaded file` });
+    }
+  }
+
   const useShim = !!tkInputs;
-  const finalCode = useShim ? `${tkShimSource}\n# === USER SCRIPT ===\n${script.code}` : script.code;
+  const finalCode = useShim ? `${tkShimSource}\n# === USER SCRIPT ===\n${userCode}` : userCode;
   const scriptPath = path.join(tmpDir, "script.py");
   await fs.writeFile(scriptPath, finalCode, "utf-8");
 
