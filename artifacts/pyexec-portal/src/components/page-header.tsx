@@ -14,12 +14,30 @@ export function PageHeader({
   back?: ReactNode;
 }) {
   return (
-    <div className="border-b bg-background/60 backdrop-blur supports-[backdrop-filter]:bg-background/50 -mx-6 md:-mx-10 px-6 md:px-10 pt-6 pb-5 mb-6 sticky top-0 z-10">
+    <div className="relative border-b bg-background/60 backdrop-blur supports-[backdrop-filter]:bg-background/50 -mx-6 md:-mx-10 px-6 md:px-10 pt-6 pb-5 mb-6 sticky top-0 z-10 overflow-hidden">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 opacity-[0.55]"
+        style={{
+          background:
+            "radial-gradient(ellipse 60% 80% at 0% 0%, hsl(var(--primary) / 0.08), transparent 60%), radial-gradient(ellipse 40% 60% at 100% 0%, hsl(var(--primary) / 0.05), transparent 70%)",
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 opacity-[0.04]"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+          maskImage: "linear-gradient(to bottom, black, transparent)",
+        }}
+      />
       {back && <div className="mb-3">{back}</div>}
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div className="flex items-start gap-3 min-w-0">
           {icon && (
-            <div className="shrink-0 h-11 w-11 rounded-md bg-primary/10 text-primary flex items-center justify-center">
+            <div className="shrink-0 h-11 w-11 rounded-md bg-gradient-to-br from-primary/15 to-primary/5 text-primary flex items-center justify-center ring-1 ring-primary/15 shadow-sm">
               {icon}
             </div>
           )}

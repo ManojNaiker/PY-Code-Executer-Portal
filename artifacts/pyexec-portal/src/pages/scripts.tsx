@@ -9,6 +9,8 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
+import { getColor, getIcon } from "@/lib/folder-icons";
+import { useEffect } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +39,15 @@ export default function ScriptsList() {
   } | null>(null);
   const [pendingId, setPendingId] = useState<number | null>(null);
   const [enhancingId, setEnhancingId] = useState<number | null>(null);
+  const [folderFilter, setFolderFilter] = useState<string>("all");
+  const [folders, setFolders] = useState<Array<{ id: number; name: string; icon: string; color: string }>>([]);
+
+  useEffect(() => {
+    fetch("/api/folders", { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then(setFolders)
+      .catch(() => {});
+  }, []);
 
   async function handleEnhance(script: { id: number; name: string }) {
     setEnhancingId(script.id);
@@ -143,6 +154,52 @@ export default function ScriptsList() {
         }
       />
 
+      {scripts && scripts.length > 0 && (() => {
+        const subjectsInUse = new Set((scripts as any[]).map(s => (s.subject ?? "").trim()).filter(Boolean));
+        const merged = [
+          ...folders.filter(f => subjectsInUse.has(f.name) || subjectsInUse.size === 0).map(f => ({ name: f.name, icon: f.icon, color: f.color })),
+          ...Array.from(subjectsInUse)
+            .filter(s => !folders.some(f => f.name === s))
+            .map(s => ({ name: s, icon: "Folder", color: "slate" })),
+        ];
+        const hasUncat = (scripts as any[]).some(s => !s.subject);
+        if (merged.length === 0 && !hasUncat) return null;
+        return (
+          <div className="flex gap-2 flex-wrap mb-6 -mt-2">
+            <button
+              onClick={() => setFolderFilter("all")}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${folderFilter === "all" ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent"}`}
+            >
+              All ({scripts.length})
+            </button>
+            {merged.map(f => {
+              const c = getColor(f.color);
+              const Icn = getIcon(f.icon);
+              const count = (scripts as any[]).filter(s => (s.subject ?? "") === f.name).length;
+              const active = folderFilter === f.name;
+              return (
+                <button
+                  key={f.name}
+                  onClick={() => setFolderFilter(f.name)}
+                  className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-colors ${active ? `${c.bg} ${c.text} ${c.border}` : "bg-card hover:bg-accent"}`}
+                >
+                  <Icn className={`h-3.5 w-3.5 ${active ? c.text : "text-muted-foreground"}`} />
+                  {f.name} ({count})
+                </button>
+              );
+            })}
+            {hasUncat && (
+              <button
+                onClick={() => setFolderFilter("__none__")}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${folderFilter === "__none__" ? "bg-accent" : "bg-card hover:bg-accent"}`}
+              >
+                Uncategorized ({(scripts as any[]).filter(s => !s.subject).length})
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {(!scripts || scripts.length === 0) ? (
         <div className="text-center py-12 border rounded-lg bg-card border-dashed">
           <FileCode2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -154,7 +211,9 @@ export default function ScriptsList() {
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {scripts.map(script => (
+          {(scripts as any[])
+            .filter(s => folderFilter === "all" ? true : folderFilter === "__none__" ? !s.subject : (s.subject ?? "") === folderFilter)
+            .map(script => (
             <Card key={script.id} className="flex flex-col">
               <CardHeader>
                 <div className="flex justify-between items-start">
