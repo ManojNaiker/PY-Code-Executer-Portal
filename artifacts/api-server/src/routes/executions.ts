@@ -379,6 +379,11 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     timeout: EXEC_TIMEOUT_MS,
     env,
     cwd: tmpDir,
+    // Detach from the parent's controlling TTY so getpass.getpass() and any
+    // other code that opens /dev/tty falls back to our piped stdin/stdout
+    // instead of writing to the node workflow's terminal and blocking.
+    detached: true,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   let stdoutBuf = "";
@@ -421,7 +426,8 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     clientClosed = true;
     clearInterval(heartbeat);
     if (proc.exitCode === null && !proc.killed) {
-      proc.kill("SIGTERM");
+      // Kill the entire detached process group so children (e.g. chromedriver) die too.
+      try { process.kill(-proc.pid!, "SIGTERM"); } catch { proc.kill("SIGTERM"); }
     }
   });
 
