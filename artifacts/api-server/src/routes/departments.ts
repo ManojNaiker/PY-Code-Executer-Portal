@@ -55,6 +55,43 @@ router.get("/departments/:id", requireAuth, async (req, res) => {
   }
 });
 
+router.post("/departments/bulk", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const user = await getUserProfile(userId);
+  if (!user || user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+  const items: Array<{ name: string; description?: string | null }> = Array.isArray(req.body?.departments) ? req.body.departments : [];
+  if (items.length === 0) return res.status(400).json({ error: "Provide a non-empty 'departments' array" });
+  if (items.length > 200) return res.status(400).json({ error: "Maximum 200 departments per request" });
+
+  const existing = await db.select().from(departmentsTable);
+  const seen = new Set(existing.map(d => d.name.toLowerCase().trim()));
+
+  const created: typeof existing = [];
+  const failed: Array<{ name: string; error: string }> = [];
+  for (const it of items) {
+    const name = String(it.name || "").trim();
+    if (!name) { failed.push({ name: it.name ?? "", error: "Name required" }); continue; }
+    if (seen.has(name.toLowerCase())) { failed.push({ name, error: "Already exists" }); continue; }
+    try {
+      const [dept] = await db.insert(departmentsTable).values({
+        name,
+        description: it.description ?? null,
+      }).returning();
+      created.push(dept);
+      seen.add(name.toLowerCase());
+    } catch (e: any) {
+      failed.push({ name, error: e?.message || "Insert failed" });
+    }
+  }
+
+  await logAudit({ req, userId, userEmail: user.email, action: "department.bulk_create", resourceType: "department", resourceId: "bulk", details: { created: created.length, failed: failed.length } });
+  res.status(201).json({
+    created: created.map(d => ({ ...d, createdAt: d.createdAt.toISOString() })),
+    failed,
+  });
+});
+
 router.delete("/departments/:id", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
   const user = await getUserProfile(userId);

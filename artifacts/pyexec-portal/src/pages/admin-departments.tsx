@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, Building2 } from "lucide-react";
+import { Trash2, Plus, Building2, Upload } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
@@ -29,6 +29,10 @@ export default function AdminDepartments() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<null | { created: any[]; failed: any[] }>(null);
 
   const { data: departments, isLoading } = useListDepartments({
     query: { queryKey: getListDepartmentsQueryKey() }
@@ -64,6 +68,44 @@ export default function AdminDepartments() {
     });
   };
 
+  const parseBulkDepts = (text: string) => {
+    const items: Array<{ name: string; description?: string | null }> = [];
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const [name, ...rest] = line.split(",").map(s => s.trim());
+      if (!name) continue;
+      items.push({ name, description: rest.join(",") || null });
+    }
+    return items;
+  };
+
+  const handleBulkImport = async () => {
+    const items = parseBulkDepts(bulkText);
+    if (items.length === 0) {
+      toast({ title: "Nothing to import", description: "Paste at least one department name per line.", variant: "destructive" });
+      return;
+    }
+    setBulkBusy(true); setBulkResult(null);
+    try {
+      const r = await fetch("/api/departments/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ departments: items }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setBulkResult(j);
+      toast({ title: `Bulk import: ${j.created.length} created, ${j.failed.length} failed` });
+      queryClient.invalidateQueries({ queryKey: getListDepartmentsQueryKey() });
+    } catch (e: any) {
+      toast({ title: "Bulk import failed", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -72,6 +114,47 @@ export default function AdminDepartments() {
           <p className="text-muted-foreground">Manage organizational units for access control.</p>
         </div>
         
+        <div className="flex gap-2">
+        <Dialog open={bulkOpen} onOpenChange={(o) => { setBulkOpen(o); if (!o) setBulkResult(null); }}>
+          <DialogTrigger asChild>
+            <Button variant="outline"><Upload className="mr-2 h-4 w-4" /> Bulk Import</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Bulk Import Departments</DialogTitle>
+              <DialogDescription>
+                One per line: <code>name,description</code> (description optional).
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Textarea
+                className="font-mono text-xs min-h-[180px]"
+                placeholder={"Engineering,Software development team\nMarketing\nFinance,Accounting and budgeting"}
+                value={bulkText}
+                onChange={e => setBulkText(e.target.value)}
+              />
+              {bulkResult && (
+                <div className="text-sm space-y-1 max-h-40 overflow-y-auto border rounded p-2">
+                  <p className="text-primary">Created: {bulkResult.created.length}</p>
+                  {bulkResult.failed.length > 0 && (
+                    <>
+                      <p className="text-destructive">Failed: {bulkResult.failed.length}</p>
+                      <ul className="list-disc pl-5 text-xs">
+                        {bulkResult.failed.map((f, i) => <li key={i}>{f.name}: {f.error}</li>)}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkOpen(false)}>Close</Button>
+              <Button onClick={handleBulkImport} disabled={bulkBusy || !bulkText.trim()}>
+                {bulkBusy ? "Importing..." : "Import"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -101,6 +184,7 @@ export default function AdminDepartments() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card>

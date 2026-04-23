@@ -7,14 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Play, Terminal, ArrowLeft, Clock, FileCode2 } from "lucide-react";
+import { Play, Terminal, ArrowLeft, Clock, FileCode2, Pencil } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { ExecutionResult } from "@workspace/api-client-react/src/generated/api.schemas";
 import { ScriptFilesManager } from "@/components/script-files-manager";
-import { useGetMyProfile, getGetMyProfileQueryKey } from "@workspace/api-client-react";
+import { useGetMyProfile, getGetMyProfileQueryKey, useListDepartments, getListDepartmentsQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function ScriptDetail() {
   const [, params] = useRoute("/scripts/:id");
@@ -25,6 +29,7 @@ export default function ScriptDetail() {
   const [args, setArgs] = useState("");
   const [result, setResult] = useState<ExecutionResult | null>(null);
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { data: profile } = useGetMyProfile({
     query: { enabled: !!user?.id, queryKey: getGetMyProfileQueryKey() }
   });
@@ -36,6 +41,62 @@ export default function ScriptDetail() {
       queryKey: getGetScriptQueryKey(scriptId)
     }
   });
+
+  const { data: departments } = useListDepartments({
+    query: { enabled: isAdmin, queryKey: getListDepartmentsQueryKey() }
+  });
+
+  // ---- Edit dialog ----
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editSubject, setEditSubject] = useState("");
+  const [editFilename, setEditFilename] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editDept, setEditDept] = useState("none");
+  const [editBusy, setEditBusy] = useState(false);
+
+  const openEdit = () => {
+    if (!script) return;
+    setEditName(script.name);
+    setEditDesc(script.description ?? "");
+    setEditSubject(script.subject ?? "");
+    setEditFilename(script.filename);
+    setEditCode(script.code);
+    setEditDept(script.departmentId ? String(script.departmentId) : "none");
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!scriptId) return;
+    setEditBusy(true);
+    try {
+      const r = await fetch(`/api/scripts/${scriptId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          name: editName,
+          description: editDesc || null,
+          subject: editSubject || null,
+          filename: editFilename,
+          code: editCode,
+          departmentId: editDept === "none" ? null : parseInt(editDept, 10),
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${r.status}`);
+      }
+      toast({ title: "Script updated" });
+      setEditOpen(false);
+      queryClient.invalidateQueries({ queryKey: getGetScriptQueryKey(scriptId) });
+    } catch (e: any) {
+      toast({ title: "Failed to update script", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setEditBusy(false);
+    }
+  };
 
   const executeScript = useExecuteScript({
     mutation: {
@@ -94,7 +155,14 @@ export default function ScriptDetail() {
                 <CardTitle className="text-2xl">{script.name}</CardTitle>
                 <CardDescription className="text-base mt-2">{script.description}</CardDescription>
               </div>
-              <Badge variant="outline" className="font-mono">{script.filename}</Badge>
+              <div className="flex items-center gap-2">
+                {isAdmin && (
+                  <Button variant="outline" size="sm" onClick={openEdit}>
+                    <Pencil className="mr-2 h-4 w-4" /> Edit
+                  </Button>
+                )}
+                <Badge variant="outline" className="font-mono">{script.filename}</Badge>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="bg-[#0d1117] text-[#c9d1d9] p-4 rounded-md overflow-x-auto font-mono text-sm border border-[#30363d]">
@@ -224,6 +292,66 @@ export default function ScriptDetail() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Script</DialogTitle>
+            <DialogDescription>
+              Update script metadata or code. Changing the code clears any cached AI-generated input schema.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Name</Label>
+                <Input value={editName} onChange={e => setEditName(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Filename</Label>
+                <Input value={editFilename} onChange={e => setEditFilename(e.target.value)} className="font-mono" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} className="min-h-[60px]" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Subject</Label>
+                <Input value={editSubject} onChange={e => setEditSubject(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Department</Label>
+                <Select value={editDept} onValueChange={setEditDept}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Global / Unassigned</SelectItem>
+                    {departments?.map(d => (
+                      <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Python Code</Label>
+              <Textarea
+                value={editCode}
+                onChange={e => setEditCode(e.target.value)}
+                className="font-mono text-xs min-h-[300px]"
+                spellCheck={false}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={editBusy || !editName.trim() || !editFilename.trim()}>
+              {editBusy ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

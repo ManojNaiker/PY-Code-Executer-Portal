@@ -55,6 +55,16 @@ Tables:
 - Regular users only see scripts assigned to their department (or unassigned scripts)
 - All actions are recorded in audit_logs
 
+## Admin Management Endpoints (raw fetch on frontend)
+
+- `POST /api/users` — create one user (email, password, firstName, lastName, role, departmentId). Default password `changeme123` if omitted.
+- `POST /api/users/bulk` — `{users:[...]}`. Items may use `departmentName` instead of `departmentId`. Returns `{created, failed}`.
+- `DELETE /api/users/:clerkId` — delete user (cannot delete self).
+- `POST /api/departments/bulk` — `{departments:[{name, description?}]}`. Returns `{created, failed}`.
+- `PUT /api/scripts/:id` — admin-only edit of name/description/subject/filename/code/departmentId. Code change clears `aiSchema` cache.
+
+UI: admin-users page has "New User" + "Bulk Import" dialogs and per-row delete; admin-departments page has "Bulk Import" dialog; script-detail page shows "Edit" button for admins.
+
 ## Notes
 
 - `lib/api-zod/src/index.ts` only exports from generated tag subdirs (not the old types folder pattern) — do not add `export * from "./generated/types"` back

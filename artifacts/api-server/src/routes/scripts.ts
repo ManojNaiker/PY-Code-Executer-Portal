@@ -129,6 +129,50 @@ router.get("/scripts/:id", requireAuth, async (req, res) => {
   }
 });
 
+router.put("/scripts/:id", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!me) return res.status(401).json({ error: "User not found" });
+    if (me.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+    const existing = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    const body = req.body || {};
+    const updates: any = { updatedAt: new Date() };
+    if (typeof body.name === "string" && body.name.trim()) updates.name = body.name.trim();
+    if (typeof body.description === "string" || body.description === null) updates.description = body.description ?? null;
+    if (typeof body.subject === "string" || body.subject === null) updates.subject = body.subject ?? null;
+    if (typeof body.filename === "string" && body.filename.trim()) updates.filename = body.filename.trim();
+    if (typeof body.code === "string") updates.code = body.code;
+    if (body.departmentId === null || typeof body.departmentId === "number") updates.departmentId = body.departmentId;
+
+    if (Object.keys(updates).length === 1) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    // When code changes, clear cached AI schema so admin can re-enhance.
+    if (typeof body.code === "string" && body.code !== existing.code) {
+      updates.aiSchema = null;
+    }
+
+    const [updated] = await db.update(scriptsTable).set(updates).where(eq(scriptsTable.id, id)).returning();
+    await logAudit({
+      req, userId, userEmail: me.email,
+      action: "script.update", resourceType: "script", resourceId: id,
+      details: { changedFields: Object.keys(updates).filter(k => k !== "updatedAt") },
+    });
+    res.json(mapScript(updated));
+  } catch (err) {
+    req.log.error({ err }, "Error updating script");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.delete("/scripts/:id", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
