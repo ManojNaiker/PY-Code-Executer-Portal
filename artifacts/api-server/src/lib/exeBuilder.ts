@@ -173,26 +173,68 @@ func init() {
 `;
   await fsp.writeFile(path.join(buildDir, "assets.go"), assetsGo, "utf8");
 
-  // 4. If we have a logo that is a PNG, convert to ICO and create rsrc.syso so the EXE has an icon.
-  if (opts.logo) {
-    try {
-      const logoBytes = await fsp.readFile(opts.logo.absPath);
-      const isPng = logoBytes.length >= 8 && logoBytes.slice(1, 4).toString() === "PNG";
-      if (isPng) {
-        const icoBytes = pngToIco(logoBytes);
-        const icoPath = path.join(buildDir, "icon.ico");
-        await fsp.writeFile(icoPath, icoBytes);
-        const sysoPath = path.join(buildDir, "rsrc.syso");
-        const env = { ...process.env, GOPATH: GO_CACHE, GOCACHE: path.join(GO_CACHE, "build-cache") };
-        const r = await runCmd(RSRC_BIN, ["-ico", "icon.ico", "-arch", "amd64", "-o", "rsrc.syso"], { cwd: buildDir, env, timeoutMs: 30_000 });
-        if (r.code !== 0) {
-          // Non-fatal — proceed without icon.
-          await fsp.unlink(sysoPath).catch(() => {});
-        }
+  // 4. Embed Windows icon + application manifest into the EXE via rsrc.
+  // The icon makes the EXE look like a real branded app (Adobe / LibreOffice
+  // style) in Explorer / taskbar / Start menu. The manifest declares the app
+  // identity, requested execution level (asInvoker, no UAC prompt), and
+  // common controls dependency, which all help reduce SmartScreen noise.
+  try {
+    let icoCreated = false;
+    if (opts.logo) {
+      const lb = await fsp.readFile(opts.logo.absPath);
+      const ext = path.extname(opts.logo.filename).toLowerCase();
+      const isPng = lb.length >= 8 && lb.slice(1, 4).toString() === "PNG";
+      const isIco = ext === ".ico" || (lb.length >= 4 && lb.readUInt16LE(0) === 0 && lb.readUInt16LE(2) === 1);
+      if (isIco) {
+        await fsp.writeFile(path.join(buildDir, "icon.ico"), lb);
+        icoCreated = true;
+      } else if (isPng) {
+        await fsp.writeFile(path.join(buildDir, "icon.ico"), pngToIco(lb));
+        icoCreated = true;
       }
-    } catch {
-      // ignore icon errors
     }
+
+    const xmlEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const appId = safeIdent(opts.scriptName).replace(/\s+/g, "") || "PyExecApp";
+    const manifest = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="1.0.0.0" processorArchitecture="amd64" name="PyExec.${xmlEsc(appId)}" type="win32"/>
+  <description>${xmlEsc(opts.scriptName)}</description>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+    </application>
+  </compatibility>
+</assembly>
+`;
+    await fsp.writeFile(path.join(buildDir, "app.manifest"), manifest, "utf8");
+
+    const args = ["-arch", "amd64", "-manifest", "app.manifest"];
+    if (icoCreated) args.push("-ico", "icon.ico");
+    args.push("-o", "rsrc.syso");
+    const renv = { ...process.env, GOPATH: GO_CACHE, GOCACHE: path.join(GO_CACHE, "build-cache") };
+    const r = await runCmd(RSRC_BIN, args, { cwd: buildDir, env: renv, timeoutMs: 30_000 });
+    if (r.code !== 0) {
+      await fsp.unlink(path.join(buildDir, "rsrc.syso")).catch(() => {});
+    }
+  } catch {
+    // Non-fatal — proceed without icon/manifest.
   }
 
   // 5. Cross-compile to Windows EXE.
