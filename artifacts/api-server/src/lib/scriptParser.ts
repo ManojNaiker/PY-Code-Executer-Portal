@@ -387,12 +387,20 @@ function detectHardcodedPaths(code: string): HardcodedPath[] {
 
   const callSpecs: FuncSpec[] = [
     { pattern: /(?:[\w.]*\.)?read_excel\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "read_excel" },
+    { pattern: /(?:[\w.]*\.)?ExcelFile\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "ExcelFile" },
     { pattern: /(?:[\w.]*\.)?read_csv\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "csv", func: "read_csv" },
+    { pattern: /(?:[\w.]*\.)?read_table\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "csv", func: "read_table" },
+    { pattern: /(?:[\w.]*\.)?read_json\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "json", func: "read_json" },
+    { pattern: /(?:[\w.]*\.)?read_parquet\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "any", func: "read_parquet" },
+    { pattern: /(?:[\w.]*\.)?read_html\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "text", func: "read_html" },
+    { pattern: /(?:[\w.]*\.)?read_xml\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "text", func: "read_xml" },
     { pattern: /(?:[\w.]*\.)?load_workbook\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "load_workbook" },
     { pattern: /xlrd\.open_workbook\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "excel", func: "open_workbook" },
     { pattern: /(?:cv2|imageio)\.imread\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "image", func: "imread" },
+    { pattern: /cv2\.VideoCapture\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "any", func: "VideoCapture" },
     { pattern: /Image\.open\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "image", func: "Image.open" },
-    { pattern: /np\.(?:loadtxt|genfromtxt)\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "text", func: "np.loadtxt" },
+    { pattern: /np\.(?:loadtxt|genfromtxt|load)\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "text", func: "np.loadtxt" },
+    { pattern: /(?:[\w.]*\.)?from_csv\s*\(\s*([rR]?['"][^'"\n]+['"])/g, kind: "csv", func: "from_csv" },
   ];
 
   for (const spec of callSpecs) {
