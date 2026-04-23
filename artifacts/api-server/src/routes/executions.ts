@@ -103,7 +103,7 @@ async function runPython(
   const start = Date.now();
   return new Promise((resolve) => {
     const proc = spawn("python3", [scriptPath, ...finalArgs], {
-      timeout: 60000,
+      timeout: 600000,
       env,
       cwd: tmpDir,
     });
