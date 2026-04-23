@@ -423,9 +423,10 @@ function detectHardcodedPaths(code: string): HardcodedPath[] {
     }
   }
 
+  const dataExt = /\.(xlsx|xls|csv|tsv|json|txt|xml|yaml|yml|ini|conf|log|html?|parquet|pdf|png|jpe?g|gif|bmp|webp|tiff?|mp4|avi|mov|mkv|wav|mp3|npy|npz|pkl|pickle|h5|hdf5|sqlite|db)$/i;
+
   // open(path, ...) — only when the file extension suggests a data file
   const openRe = /\bopen\s*\(\s*([rR]?['"][^'"\n]+['"])/g;
-  const dataExt = /\.(xlsx|xls|csv|tsv|json|txt|xml|yaml|yml|ini|conf|log|html?)$/i;
   let om: RegExpExecArray | null;
   while ((om = openRe.exec(code))) {
     const literal = om[1];
@@ -446,6 +447,43 @@ function detectHardcodedPaths(code: string): HardcodedPath[] {
       path: value,
       kind,
       func: "open",
+      label: basenameOf(value),
+    });
+  }
+
+  // Generic sweep: any string literal in the source that looks like an absolute
+  // hard-coded path (Windows drive, UNC, or absolute Unix with a data extension)
+  // — covers cases where the path is stored in a CONFIG dict / variable and
+  // accessed indirectly later (e.g. CONFIG["EXCEL_FILE"]).
+  const litRe = /([rR]?['"][^'"\n]{2,500}['"])/g;
+  let lm: RegExpExecArray | null;
+  while ((lm = litRe.exec(code))) {
+    const literal = lm[1];
+    const value = decodePythonStringLiteral(literal);
+    if (!value) continue;
+    const isWinDrive = /^[a-zA-Z]:[\\/]/.test(value);
+    const isUnc = value.startsWith("\\\\");
+    const isAbsUnix = value.startsWith("/") && value.length > 3 && dataExt.test(value);
+    if (!isWinDrive && !isUnc && !isAbsUnix) continue;
+
+    // Dedup against anything already detected (any func with same literal text)
+    const already = out.some((p) => p.literal === literal);
+    if (already) continue;
+    seen.add(`generic::${literal}`);
+
+    const ext = value.match(dataExt)?.[1]?.toLowerCase() ?? "";
+    let kind: HardcodedPath["kind"] = "any";
+    if (/^xlsx?$/.test(ext)) kind = "excel";
+    else if (/^(csv|tsv)$/.test(ext)) kind = "csv";
+    else if (ext === "json") kind = "json";
+    else if (/^(png|jpe?g|gif|bmp|webp|tiff?)$/.test(ext)) kind = "image";
+    else if (/^(txt|xml|yaml|yml|ini|conf|log|html?)$/.test(ext)) kind = "text";
+
+    out.push({
+      literal,
+      path: value,
+      kind,
+      func: "literal",
       label: basenameOf(value),
     });
   }
