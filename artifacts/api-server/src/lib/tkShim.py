@@ -159,6 +159,20 @@ class _Widget:
                 return v
         v = _lookup(self._name, self._assoc_label,
                     getattr(self._textvariable, "_name", None))
+        # Fallback: if this Entry is clearly a file-picker (label/name mentions
+        # file/path/csv/excel/etc.) and the user uploaded a file, return that
+        # absolute path instead of an empty string.
+        if (v in (None, "")) and _FILE:
+            label_lower = (self._assoc_label or "").lower()
+            name_lower = (str(self._name) or "").lower()
+            tv_name = (str(getattr(self._textvariable, "_name", "")) or "").lower()
+            haystack = " ".join((label_lower, name_lower, tv_name))
+            if any(tok in haystack for tok in (
+                "file", "path", "csv", "excel", "xlsx", "xls", "sheet",
+                "workbook", "json", "image", "select", "browse", "upload",
+                "input"
+            )):
+                return _FILE
         return v if v is not None else ""
     def current(self, idx=None):
         if idx is None:
