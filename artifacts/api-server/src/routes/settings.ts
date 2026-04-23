@@ -85,15 +85,21 @@ router.post("/settings/smtp/test", requireAuth, async (req, res) => {
   let username: string | null = body.username ? String(body.username) : null;
   let password: string | null = typeof body.password === "string" && body.password.length > 0 ? body.password : null;
 
+  const existing = (await db.select().from(smtpSettingsTable).limit(1))[0];
+
   // If form fields not given, fall back to stored settings
   if (!host || !Number.isFinite(port)) {
-    const existing = (await db.select().from(smtpSettingsTable).limit(1))[0];
     if (!existing) return res.status(400).json({ error: "No SMTP settings configured. Save settings first or provide host/port." });
     host = existing.host;
     port = existing.port;
     secure = existing.secure;
     username = existing.username;
     if (!password) password = existing.password;
+  }
+
+  // If password is blank but a saved one exists for the same username, use it
+  if (!password && existing && existing.password && (username ?? "") === (existing.username ?? "")) {
+    password = existing.password;
   }
 
   const result = await testSmtp({ host, port, secure, username, password, to });
