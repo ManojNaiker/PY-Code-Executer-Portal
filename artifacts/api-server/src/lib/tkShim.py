@@ -282,6 +282,37 @@ class _Tk(_Widget):
                         pass
         except Exception:
             pass
+        # GUI scripts often write detailed progress / error info to log files
+        # (e.g. "client_process_log.txt") instead of stdout, because their UI
+        # would normally show it. Headless mode hides that, so dump any small
+        # log/txt files the script created in cwd to stdout for visibility.
+        try:
+            import glob as _glob
+            seen = set()
+            for pat in ("*.log", "*log*.txt", "*.txt"):
+                for p in sorted(_glob.glob(pat)):
+                    if p in seen: continue
+                    seen.add(p)
+                    # skip obvious non-log files and our own uploaded inputs
+                    if p.lower() in ("script.py",): continue
+                    try:
+                        sz = os.path.getsize(p)
+                    except Exception:
+                        continue
+                    if sz <= 0 or sz > 256 * 1024:
+                        continue
+                    try:
+                        with open(p, "r", encoding="utf-8", errors="replace") as f:
+                            data = f.read()
+                    except Exception:
+                        continue
+                    if not data.strip():
+                        continue
+                    print(f"\n----- {p} -----")
+                    print(data, end="" if data.endswith("\n") else "\n")
+                    print(f"----- end {p} -----")
+        except Exception:
+            pass
     def quit(self): pass
 
 # ------------------------ build modules ------------------------
