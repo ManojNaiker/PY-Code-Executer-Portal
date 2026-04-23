@@ -284,6 +284,9 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Connection", "keep-alive");
+  // Disable Nagle so each event flushes to the client immediately.
+  try { req.socket?.setNoDelay(true); } catch { /* ignore */ }
   res.flushHeaders?.();
 
   const send = (obj: any) => {
@@ -371,23 +374,27 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
   send({ type: "status", message: `Running: python3 script.py ${finalArgs.join(" ")}`.trim() });
 
   const start = Date.now();
+  const EXEC_TIMEOUT_MS = 5 * 60 * 1000;
   const proc = spawn("python3", ["-u", scriptPath, ...finalArgs], {
-    timeout: 60000,
+    timeout: EXEC_TIMEOUT_MS,
     env,
     cwd: tmpDir,
   });
 
   let stdoutBuf = "";
   let stderrBuf = "";
+  let lastOutputAt = Date.now();
 
   proc.stdout.on("data", (d: Buffer) => {
     const s = d.toString();
     stdoutBuf += s;
+    lastOutputAt = Date.now();
     send({ type: "stdout", data: s });
   });
   proc.stderr.on("data", (d: Buffer) => {
     const s = d.toString();
     stderrBuf += s;
+    lastOutputAt = Date.now();
     send({ type: "stderr", data: s });
   });
 
@@ -398,9 +405,21 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     proc.stdin.end();
   }
 
+  // Heartbeat: every 10s without output, send a status so the client knows
+  // the process is still alive (e.g. Selenium starting a browser, network call).
+  const heartbeat = setInterval(() => {
+    if (proc.exitCode !== null || proc.killed) return;
+    const idleSec = Math.floor((Date.now() - lastOutputAt) / 1000);
+    const totalSec = Math.floor((Date.now() - start) / 1000);
+    if (idleSec >= 10) {
+      send({ type: "status", message: `Still running... (${totalSec}s elapsed, no output for ${idleSec}s). Will time out at ${EXEC_TIMEOUT_MS / 1000}s.` });
+    }
+  }, 10000);
+
   let clientClosed = false;
   req.on("close", () => {
     clientClosed = true;
+    clearInterval(heartbeat);
     if (proc.exitCode === null && !proc.killed) {
       proc.kill("SIGTERM");
     }
@@ -425,8 +444,12 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     if (!res.writableEnded) res.end();
   });
 
-  proc.on("close", async (code: number | null) => {
+  proc.on("close", async (code: number | null, signal: NodeJS.Signals | null) => {
+    clearInterval(heartbeat);
     const executionTimeMs = Date.now() - start;
+    if (signal === "SIGTERM" && executionTimeMs >= EXEC_TIMEOUT_MS - 1000) {
+      send({ type: "stderr", data: `\n[runtime] Script timed out after ${EXEC_TIMEOUT_MS / 1000}s and was killed.\n` });
+    }
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     let executionId: number | null = null;
     try {
