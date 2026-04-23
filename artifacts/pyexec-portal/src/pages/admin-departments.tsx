@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useListDepartments, getListDepartmentsQueryKey, useCreateDepartment, useDeleteDepartment } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -107,14 +107,13 @@ export default function AdminDepartments() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Departments</h1>
-          <p className="text-muted-foreground">Manage organizational units for access control.</p>
-        </div>
-        
-        <div className="flex gap-2">
+    <div>
+      <PageHeader
+        title="Departments"
+        description="Manage organizational units for access control."
+        icon={<Building2 className="h-5 w-5" />}
+        actions={
+          <>
         <Dialog open={bulkOpen} onOpenChange={(o) => { setBulkOpen(o); if (!o) setBulkResult(null); }}>
           <DialogTrigger asChild>
             <Button variant="outline"><Upload className="mr-2 h-4 w-4" /> Bulk Import</Button>
@@ -184,11 +183,11 @@ export default function AdminDepartments() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      <Card>
-        <CardContent className="p-0">
+      <div className="border rounded-lg overflow-hidden bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -249,8 +248,7 @@ export default function AdminDepartments() {
               )}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

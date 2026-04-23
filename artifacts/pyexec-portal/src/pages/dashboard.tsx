@@ -1,8 +1,9 @@
 import { useGetDashboardStats, getGetDashboardStatsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, Code2, Users, Building2, Terminal } from "lucide-react";
+import { Activity, Code2, Users, Building2, Terminal, LayoutDashboard } from "lucide-react";
 import { format } from "date-fns";
+import { PageHeader } from "@/components/page-header";
 
 export default function Dashboard() {
   const { data: stats, isLoading, error } = useGetDashboardStats({
@@ -13,8 +14,8 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+      <div>
+        <PageHeader title="Dashboard" description="Overview of platform activity and metrics." icon={<LayoutDashboard className="h-5 w-5" />} />
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-32 rounded-xl" />)}
         </div>
@@ -27,12 +28,9 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of platform activity and metrics.</p>
-      </div>
-
+    <div>
+      <PageHeader title="Dashboard" description="Overview of platform activity and metrics." icon={<LayoutDashboard className="h-5 w-5" />} />
+      <div className="space-y-8">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -127,6 +125,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         )}
+      </div>
       </div>
     </div>
   );

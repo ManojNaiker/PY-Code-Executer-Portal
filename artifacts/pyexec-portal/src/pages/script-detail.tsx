@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Play, Terminal, ArrowLeft, Clock, FileCode2, Pencil } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -139,37 +140,39 @@ export default function ScriptDetail() {
   }
 
   return (
-    <div className="space-y-6">
-      <Button variant="ghost" asChild className="pl-0 text-muted-foreground hover:text-foreground">
-        <Link href="/scripts">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Scripts
-        </Link>
-      </Button>
+    <div>
+      <PageHeader
+        title={script.name}
+        description={script.description || undefined}
+        icon={<FileCode2 className="h-5 w-5" />}
+        back={
+          <Button variant="ghost" asChild size="sm" className="pl-0 h-7 text-muted-foreground hover:text-foreground">
+            <Link href="/scripts">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Scripts
+            </Link>
+          </Button>
+        }
+        actions={
+          <>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={openEdit}>
+                <Pencil className="mr-2 h-4 w-4" /> Edit
+              </Button>
+            )}
+            <Badge variant="outline" className="font-mono">{script.filename}</Badge>
+          </>
+        }
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-start justify-between space-y-0">
-              <div>
-                <CardTitle className="text-2xl">{script.name}</CardTitle>
-                <CardDescription className="text-base mt-2">{script.description}</CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                {isAdmin && (
-                  <Button variant="outline" size="sm" onClick={openEdit}>
-                    <Pencil className="mr-2 h-4 w-4" /> Edit
-                  </Button>
-                )}
-                <Badge variant="outline" className="font-mono">{script.filename}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="bg-[#0d1117] text-[#c9d1d9] p-4 rounded-md overflow-x-auto font-mono text-sm border border-[#30363d]">
-                <pre><code>{script.code}</code></pre>
-              </div>
-            </CardContent>
-          </Card>
+          <div>
+            <h2 className="text-base font-semibold mb-3">Source Code</h2>
+            <div className="bg-[#0d1117] text-[#c9d1d9] p-4 rounded-md overflow-x-auto font-mono text-sm border border-[#30363d]">
+              <pre><code>{script.code}</code></pre>
+            </div>
+          </div>
 
           {result && (
             <Card className={result.success ? "border-primary/50" : "border-destructive/50"}>

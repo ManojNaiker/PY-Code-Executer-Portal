@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Mail, Send, Save, Loader2 } from "lucide-react";
+import { Mail, Send, Save, Loader2, Settings as SettingsIcon } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 
 type SmtpSettings = {
   id: number;
@@ -130,23 +130,22 @@ export default function AdminSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Configure platform-wide settings. Changes apply immediately.</p>
-      </div>
+    <div>
+      <PageHeader
+        title="Settings"
+        description="Configure platform-wide settings. Changes apply immediately."
+        icon={<SettingsIcon className="h-5 w-5" />}
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Mail className="h-5 w-5" />
-            Email (SMTP)
-          </CardTitle>
-          <CardDescription>
+      <div className="space-y-10 max-w-5xl">
+        <section>
+          <div className="flex items-center gap-2 mb-1">
+            <Mail className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-semibold">Email (SMTP)</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-5">
             Used to send notifications such as new-user welcome emails. Leave password blank to keep the saved one.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          </p>
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -211,20 +210,16 @@ export default function AdminSettings() {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Notifications</CardTitle>
-          <CardDescription>When SMTP is enabled, the following events trigger emails:</CardDescription>
-        </CardHeader>
-        <CardContent>
+        <section className="border-t pt-8">
+          <h2 className="text-base font-semibold mb-1">Notifications</h2>
+          <p className="text-sm text-muted-foreground mb-3">When SMTP is enabled, the following events trigger emails:</p>
           <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
             <li>New user created — welcome email with login credentials sent to the new user.</li>
           </ul>
-        </CardContent>
-      </Card>
+        </section>
+      </div>
     </div>
   );
 }

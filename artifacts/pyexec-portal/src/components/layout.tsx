@@ -141,8 +141,8 @@ export function Layout({ children }: { children: ReactNode }) {
             <SidebarMobileTrigger />
             <span className="font-bold">PyExec Portal</span>
           </header>
-          <div className="flex-1 overflow-y-auto p-6 md:p-8">
-            <div className="mx-auto max-w-5xl w-full">
+          <div className="flex-1 overflow-y-auto px-6 md:px-10 pb-10">
+            <div className="w-full">
               {children}
             </div>
           </div>

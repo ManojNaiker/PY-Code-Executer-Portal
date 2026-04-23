@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useListAuditLogs, getListAuditLogsQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { ScrollText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -38,13 +39,14 @@ export default function AdminAudit() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Audit Log</h1>
-        <p className="text-muted-foreground">Comprehensive system activity trail.</p>
-      </div>
+    <div>
+      <PageHeader
+        title="Audit Log"
+        description="Comprehensive system activity trail."
+        icon={<ScrollText className="h-5 w-5" />}
+      />
 
-      <div className="flex gap-4">
+      <div className="flex gap-4 mb-6">
         <Select value={actionFilter} onValueChange={(val) => { setActionFilter(val); setPage(1); }}>
           <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="Filter by action" />
@@ -68,8 +70,7 @@ export default function AdminAudit() {
         />
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+      <div className="border rounded-lg overflow-hidden bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -166,8 +167,7 @@ export default function AdminAudit() {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

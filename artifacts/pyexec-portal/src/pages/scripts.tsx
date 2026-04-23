@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Play, Trash2, FileCode2, Sparkles, Loader2 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -115,11 +116,13 @@ export default function ScriptsList() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold tracking-tight">Scripts</h1>
-          <Button disabled>Upload Script</Button>
-        </div>
+      <div>
+        <PageHeader
+          title="Scripts"
+          description="Browse and execute available Python scripts."
+          icon={<FileCode2 className="h-5 w-5" />}
+          actions={<Button disabled>Upload Script</Button>}
+        />
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map(i => <Skeleton key={i} className="h-48 rounded-xl" />)}
         </div>
@@ -128,16 +131,17 @@ export default function ScriptsList() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Scripts</h1>
-          <p className="text-muted-foreground">Browse and execute available Python scripts.</p>
-        </div>
-        <Button asChild>
-          <Link href="/upload">Upload Script</Link>
-        </Button>
-      </div>
+    <div>
+      <PageHeader
+        title="Scripts"
+        description="Browse and execute available Python scripts."
+        icon={<FileCode2 className="h-5 w-5" />}
+        actions={
+          <Button asChild>
+            <Link href="/upload">Upload Script</Link>
+          </Button>
+        }
+      />
 
       {(!scripts || scripts.length === 0) ? (
         <div className="text-center py-12 border rounded-lg bg-card border-dashed">

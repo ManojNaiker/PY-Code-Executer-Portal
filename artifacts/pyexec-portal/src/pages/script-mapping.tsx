@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Folder, FolderOpen, ArrowLeft, Play, Download, FileCode2, Search } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -77,8 +78,8 @@ export default function ScriptMapping() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold tracking-tight">Script Mapping</h1>
+      <div>
+        <PageHeader title="Script Mapping" description="Scripts organized by Subject." icon={<Folder className="h-5 w-5" />} />
         <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-36 rounded-xl" />)}
         </div>
@@ -88,21 +89,17 @@ export default function ScriptMapping() {
 
   if (currentFolder) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setOpenFolder(null)}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back to folders
-          </Button>
-        </div>
-        <div className="flex items-center gap-3">
-          <FolderOpen className="h-8 w-8 text-amber-500" />
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">{currentFolder.name}</h1>
-            <p className="text-muted-foreground">
-              {currentFolder.items.length} script{currentFolder.items.length === 1 ? "" : "s"} in this folder
-            </p>
-          </div>
-        </div>
+      <div>
+        <PageHeader
+          title={currentFolder.name}
+          description={`${currentFolder.items.length} script${currentFolder.items.length === 1 ? "" : "s"} in this folder`}
+          icon={<FolderOpen className="h-5 w-5" />}
+          back={
+            <Button variant="ghost" size="sm" className="pl-0 h-7 text-muted-foreground hover:text-foreground" onClick={() => setOpenFolder(null)}>
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back to folders
+            </Button>
+          }
+        />
 
         {currentFolder.items.length === 0 ? (
           <div className="text-center py-12 border rounded-lg bg-card border-dashed">
@@ -190,22 +187,23 @@ export default function ScriptMapping() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Script Mapping</h1>
-          <p className="text-muted-foreground">Scripts organized by Subject. Click a folder to open.</p>
-        </div>
-        <div className="relative w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search folders or scripts..."
-            className="pl-9"
-          />
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        title="Script Mapping"
+        description="Scripts organized by Subject. Click a folder to open."
+        icon={<Folder className="h-5 w-5" />}
+        actions={
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search folders or scripts..."
+              className="pl-9"
+            />
+          </div>
+        }
+      />
 
       {filteredFolders.length === 0 ? (
         <div className="text-center py-12 border rounded-lg bg-card border-dashed">

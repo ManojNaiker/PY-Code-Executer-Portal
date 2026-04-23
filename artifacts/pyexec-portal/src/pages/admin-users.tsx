@@ -4,8 +4,9 @@ import {
   useListDepartments, getListDepartmentsQueryKey,
   useAssignUserDepartment, useAssignUserRole
 } from "@workspace/api-client-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { Users as UsersIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -177,13 +178,13 @@ export default function AdminUsers() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Users</h1>
-          <p className="text-muted-foreground">Manage user accounts, roles, and department assignments.</p>
-        </div>
-        <div className="flex gap-2">
+    <div>
+      <PageHeader
+        title="Users"
+        description="Manage user accounts, roles, and department assignments."
+        icon={<UsersIcon className="h-5 w-5" />}
+        actions={
+          <>
           <Dialog open={bulkOpen} onOpenChange={(o) => { setBulkOpen(o); if (!o) setBulkResult(null); }}>
             <DialogTrigger asChild>
               <Button variant="outline"><Upload className="mr-2 h-4 w-4" /> Bulk Import</Button>
@@ -288,11 +289,11 @@ export default function AdminUsers() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      <Card>
-        <CardContent className="p-0">
+      <div className="border rounded-lg overflow-hidden bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -378,8 +379,7 @@ export default function AdminUsers() {
               )}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

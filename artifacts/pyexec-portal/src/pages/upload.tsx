@@ -4,8 +4,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useUploadScript, useListDepartments, getListDepartmentsQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { PageHeader } from "@/components/page-header";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -111,19 +111,19 @@ export default function Upload() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Upload Script</h1>
-        <p className="text-muted-foreground">Deploy a new Python script to the portal.</p>
-      </div>
-
-      <Card>
+    <div>
+      <PageHeader
+        title="Upload Script"
+        description="Deploy a new Python script to the portal."
+        icon={<UploadIcon className="h-5 w-5" />}
+      />
+      <div className="max-w-3xl">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)}>
-            <CardHeader>
-              <CardTitle>Script Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+            <div>
+              <h2 className="text-base font-semibold mb-1">Script Details</h2>
+              <p className="text-sm text-muted-foreground mb-5">Provide the file and metadata for this script.</p>
+              <div className="space-y-6">
               
               <div className="space-y-2">
                 <label className={`text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 ${fileError ? "text-destructive" : ""}`}>Python File *</label>
@@ -225,8 +225,9 @@ export default function Upload() {
                   </FormItem>
                 )}
               />
-            </CardContent>
-            <CardFooter className="flex justify-end border-t pt-6">
+              </div>
+            </div>
+            <div className="flex justify-end border-t pt-6">
               <Button type="submit" disabled={uploadScript.isPending || !filename}>
                 {uploadScript.isPending ? "Uploading..." : (
                   <>
@@ -235,10 +236,10 @@ export default function Upload() {
                   </>
                 )}
               </Button>
-            </CardFooter>
+            </div>
           </form>
         </Form>
-      </Card>
+      </div>
     </div>
   );
 }
