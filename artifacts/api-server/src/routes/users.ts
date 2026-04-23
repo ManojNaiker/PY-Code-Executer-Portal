@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { generateUserId } from "../lib/sessionAuth";
+import { sendEmail } from "../lib/email";
 import { AssignUserDepartmentBody, AssignUserRoleBody, UpdateMyProfileBody } from "@workspace/api-zod";
 
 const router = Router();
@@ -176,7 +177,39 @@ async function createOneUser(input: NewUserInput) {
     departmentId: input.departmentId ?? null,
     passwordHash,
   }).returning();
-  return { ok: true as const, user };
+  return { ok: true as const, user, plainPassword: password };
+}
+
+async function sendNewUserNotification(user: { email: string; firstName: string | null; lastName: string | null; role: string }, plainPassword: string) {
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
+  const subject = "Your PyExec Portal account has been created";
+  const text = [
+    `Hello ${fullName},`,
+    "",
+    "An account has been created for you on PyExec Portal.",
+    "",
+    `Email:    ${user.email}`,
+    `Password: ${plainPassword}`,
+    `Role:     ${user.role}`,
+    "",
+    "Please sign in and change your password as soon as possible.",
+    "",
+    "— PyExec Portal",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;color:#0f1e3c;">
+      <h2 style="color:#1d3573;">Welcome to PyExec Portal</h2>
+      <p>Hello ${fullName},</p>
+      <p>An account has been created for you. You can sign in with the credentials below:</p>
+      <table style="border-collapse:collapse;margin:12px 0;">
+        <tr><td style="padding:4px 12px;color:#555;">Email</td><td style="padding:4px 12px;font-family:monospace;">${user.email}</td></tr>
+        <tr><td style="padding:4px 12px;color:#555;">Password</td><td style="padding:4px 12px;font-family:monospace;">${plainPassword}</td></tr>
+        <tr><td style="padding:4px 12px;color:#555;">Role</td><td style="padding:4px 12px;">${user.role}</td></tr>
+      </table>
+      <p style="color:#888;font-size:12px;">Please sign in and change your password as soon as possible.</p>
+    </div>`;
+  const result = await sendEmail({ to: user.email, subject, text, html });
+  return result;
 }
 
 router.post("/users", requireAuth, async (req, res) => {
@@ -186,7 +219,9 @@ router.post("/users", requireAuth, async (req, res) => {
     const result = await createOneUser(req.body || {});
     if (!result.ok) return res.status(400).json({ error: result.error });
     await logAudit({ req, userId: admin.clerkId, userEmail: admin.email, action: "user.create", resourceType: "user", resourceId: result.user.clerkId, details: { email: result.user.email, role: result.user.role } });
-    res.status(201).json(await getUserWithDept(result.user.clerkId));
+    const emailResult = await sendNewUserNotification(result.user, result.plainPassword);
+    if (!emailResult.ok) req.log.warn({ email: result.user.email, error: emailResult.error }, "User created but notification email not sent");
+    res.status(201).json({ ...(await getUserWithDept(result.user.clerkId)), notificationSent: emailResult.ok, notificationError: emailResult.ok ? undefined : emailResult.error });
   } catch (err) {
     req.log.error({ err }, "Error creating user");
     res.status(500).json({ error: "Internal server error" });
@@ -214,7 +249,10 @@ router.post("/users/bulk", requireAuth, async (req, res) => {
     }
     const tempPassword = item.password && String(item.password).length >= 6 ? undefined : "changeme123";
     const r = await createOneUser(item);
-    if (r.ok) created.push({ email: r.user.email, clerkId: r.user.clerkId, ...(tempPassword ? { tempPassword } : {}) });
+    if (r.ok) {
+      created.push({ email: r.user.email, clerkId: r.user.clerkId, ...(tempPassword ? { tempPassword } : {}) });
+      sendNewUserNotification(r.user, r.plainPassword).catch(() => {});
+    }
     else failed.push({ email: r.email, error: r.error });
   }
 

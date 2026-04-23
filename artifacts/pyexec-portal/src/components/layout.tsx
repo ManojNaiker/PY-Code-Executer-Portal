@@ -26,7 +26,8 @@ import {
   LogOut,
   User as UserIcon,
   Menu,
-  FolderTree
+  FolderTree,
+  Settings as SettingsIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -62,6 +63,7 @@ export function Layout({ children }: { children: ReactNode }) {
     { title: "Departments", href: "/admin/departments", icon: Building2 },
     { title: "Users", href: "/admin/users", icon: Users },
     { title: "Audit Log", href: "/admin/audit", icon: ShieldAlert },
+    { title: "Settings", href: "/admin/settings", icon: SettingsIcon },
   ];
 
   return (

@@ -13,6 +13,7 @@ import Upload from "./pages/upload";
 import AdminDepartments from "./pages/admin-departments";
 import AdminUsers from "./pages/admin-users";
 import AdminAudit from "./pages/admin-audit";
+import AdminSettings from "./pages/admin-settings";
 import NotFound from "./pages/not-found";
 import { Layout } from "./components/layout";
 import { queryClient } from "./lib/queryClient";
@@ -221,6 +222,7 @@ function AppRoutes() {
           <Route path="/admin/departments"><AuthGuard><AdminDepartments /></AuthGuard></Route>
           <Route path="/admin/users"><AuthGuard><AdminUsers /></AuthGuard></Route>
           <Route path="/admin/audit"><AuthGuard><AdminAudit /></AuthGuard></Route>
+          <Route path="/admin/settings"><AuthGuard><AdminSettings /></AuthGuard></Route>
           <Route component={NotFound} />
         </Switch>
         <Toaster />

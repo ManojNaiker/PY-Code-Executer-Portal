@@ -8,6 +8,7 @@ import executionsRouter from "./executions";
 import auditRouter from "./audit";
 import authRouter from "./auth";
 import aiEnhanceRouter from "./aiEnhance";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(scriptFilesRouter);
 router.use(executionsRouter);
 router.use(aiEnhanceRouter);
 router.use(auditRouter);
+router.use(settingsRouter);
 
 export default router;
