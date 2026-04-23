@@ -260,6 +260,28 @@ class _Tk(_Widget):
         except Exception as e:
             import traceback
             traceback.print_exc()
+        # Real Tk.mainloop() blocks the main thread, which in turn keeps
+        # daemon worker threads alive. Our shim returns immediately after
+        # invoking the action, so any background work the script kicked off
+        # via threading.Thread(..., daemon=True).start() would die instantly.
+        # Wait for all non-main threads (daemon or not) to finish so the
+        # script can actually do its work.
+        try:
+            import threading as _threading
+            main_t = _threading.main_thread()
+            current_t = _threading.current_thread()
+            while True:
+                alive = [t for t in _threading.enumerate()
+                         if t is not main_t and t is not current_t and t.is_alive()]
+                if not alive:
+                    break
+                for t in alive:
+                    try:
+                        t.join(timeout=1.0)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     def quit(self): pass
 
 # ------------------------ build modules ------------------------
