@@ -374,7 +374,7 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
   send({ type: "status", message: `Running: python3 script.py ${finalArgs.join(" ")}`.trim() });
 
   const start = Date.now();
-  const EXEC_TIMEOUT_MS = 5 * 60 * 1000;
+  const EXEC_TIMEOUT_MS = 30 * 60 * 1000;
   const proc = spawn("python3", ["-u", scriptPath, ...finalArgs], {
     timeout: EXEC_TIMEOUT_MS,
     env,
