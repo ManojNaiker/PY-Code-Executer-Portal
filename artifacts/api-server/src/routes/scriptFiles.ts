@@ -214,63 +214,12 @@ router.delete("/scripts/:id/supporting-files/:name", requireAuth, async (req, re
 // Download script as a ZIP bundle (any user with access)
 // Bundle contains: <script.py>, run.bat (Windows launcher), all supporting files,
 // and logo file (if present). When EXE generation is added later, the .exe replaces .py + run.bat.
-router.get("/scripts/:id/download", requireAuth, async (req, res) => {
-  try {
-    const ctx = await loadScriptOrDeny(req, res, false);
-    if (!ctx) return;
-    const script = ctx.script;
-    const supporting = (script.supportingFiles ?? []) as Array<{ name: string; path: string; size: number }>;
-
-    const baseName = (script.filename || "script.py").replace(/\.py$/i, "");
-    const zipName = `${baseName}.zip`;
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${zipName}"`);
-
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.on("error", (err) => {
-      req.log.error({ err }, "archiver error");
-      try { res.status(500).end(); } catch {}
-    });
-    archive.pipe(res);
-
-    // Main script
-    archive.append(script.code, { name: script.filename || "script.py" });
-
-    // Windows launcher
-    const launcher = `@echo off\r\nREM Auto-generated launcher for ${script.name}\r\npython "%~dp0${script.filename || "script.py"}" %*\r\npause\r\n`;
-    archive.append(launcher, { name: "run.bat" });
-
-    // README
-    const readme = `# ${script.name}\r\n\r\n${script.description ?? ""}\r\n\r\nSubject: ${script.subject ?? "-"}\r\n\r\nDouble-click run.bat (Python required).\r\n`;
-    archive.append(readme, { name: "README.txt" });
-
-    // Logo
-    if (script.logoPath) {
-      const abs = path.resolve(process.cwd(), script.logoPath);
-      if (abs.startsWith(UPLOAD_ROOT) && fs.existsSync(abs)) {
-        archive.file(abs, { name: `logo${path.extname(abs)}` });
-      }
-    }
-
-    // Supporting files
-    for (const f of supporting) {
-      const abs = path.resolve(process.cwd(), f.path);
-      if (abs.startsWith(UPLOAD_ROOT) && fs.existsSync(abs)) {
-        archive.file(abs, { name: f.name });
-      }
-    }
-
-    await logAudit({
-      req, userId: ctx.me.clerkId, userEmail: ctx.me.email,
-      action: "script.download", resourceType: "script", resourceId: ctx.id,
-    });
-
-    await archive.finalize();
-  } catch (err) {
-    req.log.error({ err }, "Error building download");
-    if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
-  }
+// Source download is just an alias for the EXE bundle: zip with the .exe and
+// any supporting files (no .py, logo, README, or run.bat — those are either
+// embedded in the EXE or no longer needed).
+router.get("/scripts/:id/download", requireAuth, (req, res, next) => {
+  req.url = req.url.replace(/\/download(\?|$)/, "/exe$1");
+  next();
 });
 
 // Build & download as EXE (any user with access).
