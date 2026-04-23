@@ -266,10 +266,32 @@ export type DepInstallResult = {
   log: string;
 };
 
+// Some packages aren't imported directly but are required at runtime (e.g.
+// pandas needs openpyxl to read .xlsx, xlrd for .xls, lxml for .read_html, etc.)
+function detectImplicitImports(code: string): string[] {
+  const out = new Set<string>();
+  // Excel via pandas/openpyxl
+  if (/\.read_excel\s*\(|\.to_excel\s*\(|\bExcelFile\s*\(|\bExcelWriter\s*\(/.test(code)) {
+    if (/\.xlsx?\b|\.xlsm\b/i.test(code) || !/\.xls\b/i.test(code)) out.add("openpyxl");
+    if (/\.xls(\b|['"])/i.test(code)) out.add("xlrd");
+    if (/\.xlsb\b/i.test(code)) out.add("pyxlsb");
+  }
+  if (/\bload_workbook\s*\(|from\s+openpyxl/.test(code)) out.add("openpyxl");
+  // HTML / XML parsing in pandas
+  if (/\.read_html\s*\(/.test(code)) { out.add("lxml"); out.add("bs4"); }
+  if (/\.read_xml\s*\(/.test(code)) out.add("lxml");
+  // Parquet / Feather
+  if (/\.read_parquet\s*\(|\.to_parquet\s*\(/.test(code)) out.add("pyarrow");
+  if (/\.read_feather\s*\(|\.to_feather\s*\(/.test(code)) out.add("pyarrow");
+  // SQL via sqlalchemy
+  if (/\.read_sql\s*\(|\.to_sql\s*\(/.test(code)) out.add("sqlalchemy");
+  return [...out];
+}
+
 export async function ensureDependencies(code: string): Promise<DepInstallResult> {
   await ensureDepsDir();
   const stdlib = await getStdlibModules();
-  const imports = extractTopLevelImports(code);
+  const imports = [...new Set([...extractTopLevelImports(code), ...detectImplicitImports(code)])];
   const result: DepInstallResult = { attempted: [], installed: [], failed: [], log: "" };
   const logs: string[] = [];
   const log = (m: string) => logs.push(m);
@@ -313,7 +335,7 @@ export async function checkDependencies(code: string): Promise<DepStatus[]> {
   await ensureDepsDir();
   const stdlib = await getStdlibModules();
   installedCache = null; // always re-scan for fresh status
-  const imports = extractTopLevelImports(code);
+  const imports = [...new Set([...extractTopLevelImports(code), ...detectImplicitImports(code)])];
   const out: DepStatus[] = [];
   for (const mod of imports) {
     if (stdlib.has(mod)) continue;
