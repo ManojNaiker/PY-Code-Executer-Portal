@@ -325,6 +325,23 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
     ? parseTkinterForm(code)
     : null;
 
+  // De-duplicate file pickers: if the Tkinter form already exposes a dedicated
+  // file picker (needsFile=true), don't ALSO show the generic "Select a file
+  // (replaces native file dialog)" picker — they target the same upload slot.
+  // Likewise, drop any text Entry whose label matches the file picker's label,
+  // because that Entry is just the read-out for the Browse button.
+  if (tkForm) {
+    const fileLabelLower = (tkForm.fileLabel || "").trim().toLowerCase();
+    if (tkForm.needsFile) {
+      file = null;
+      if (fileLabelLower) {
+        tkForm.fields = tkForm.fields.filter(
+          (f) => (f.label || "").trim().toLowerCase() !== fileLabelLower,
+        );
+      }
+    }
+  }
+
   const hardcodedPaths = detectHardcodedPaths(code);
 
   return { args, inputs, needsStdin, stdinPrompt, file, gui, tkForm, hardcodedPaths };
