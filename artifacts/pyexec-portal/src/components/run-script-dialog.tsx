@@ -175,6 +175,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [aiFixOpen, setAiFixOpen] = useState(false);
   const [aiFixLoading, setAiFixLoading] = useState(false);
   const [aiFixApplying, setAiFixApplying] = useState(false);
+  const [aiFixAutoMode, setAiFixAutoMode] = useState(false);
   const [aiFixProposal, setAiFixProposal] = useState<AiFixProposal | null>(null);
   const [aiFixProvider, setAiFixProvider] = useState<string | null>(null);
   const [aiFixOriginal, setAiFixOriginal] = useState<string | null>(null);
@@ -237,6 +238,9 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setDeps(null);
       setAiSchema(null);
       setLiveLog([]);
+      setAiFixProposal(null);
+      setAiFixApplied(false);
+      setAiFixAutoMode(false);
       return;
     }
     setDepsLoading(true);
@@ -512,6 +516,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       toast({ title: "Failed to execute", description: String(e), variant: "destructive" });
     } finally {
       setRunning(false);
+      setAiFixAutoMode(false);
     }
   }
 
@@ -580,6 +585,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   async function requestAiFix() {
     if (!result) return;
     setAiFixOpen(true);
+    setAiFixAutoMode(false);
     setAiFixApplied(false);
     setAiFixProposal(null);
     setAiFixProvider(null);
@@ -608,6 +614,59 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setAiFixLoading(false);
     }
   }
+
+  async function fixAndRerun() {
+    if (!result) return;
+    setAiFixAutoMode(true);
+    setAiFixApplied(false);
+    setAiFixProposal(null);
+    setAiFixProvider(null);
+    setAiFixOriginal(null);
+    setAiFixLoading(true);
+    try {
+      // Step 1 — JARVIS analyses the error and proposes a fix
+      const r = await fetch(`/api/scripts/${scriptId}/ai-fix-error`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          stderr: result.stderr,
+          stdout: result.stdout,
+          exitCode: result.exitCode,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const proposal: AiFixProposal = j.proposal;
+      setAiFixProposal(proposal);
+      setAiFixProvider(j.provider ?? null);
+      setAiFixOriginal(j.originalCode ?? null);
+
+      // Step 2 — Auto-apply the fix
+      const applyRes = await fetch(`/api/scripts/${scriptId}/ai-fix-error/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ fixedCode: proposal.fixedCode }),
+      });
+      const applyJ = await applyRes.json().catch(() => ({}));
+      if (!applyRes.ok) throw new Error(applyJ.error || `HTTP ${applyRes.status}`);
+      setAiFixApplied(true);
+    } catch (e: any) {
+      toast({ title: "JARVIS fix failed", description: e?.message || String(e), variant: "destructive" });
+      setAiFixAutoMode(false);
+    } finally {
+      setAiFixLoading(false);
+    }
+  }
+
+  // After fixAndRerun applies the fix, automatically re-run
+  useEffect(() => {
+    if (aiFixAutoMode && aiFixApplied && !aiFixLoading && !running) {
+      executeNow();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiFixAutoMode, aiFixApplied, aiFixLoading]);
 
   async function applyAiFix() {
     if (!aiFixProposal) return;
@@ -1285,21 +1344,64 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             {!result.stdout && !result.stderr && (
               <p className="text-xs italic text-muted-foreground">No output produced.</p>
             )}
-            {!result.success && isAdmin && (
-              <div className="border border-dashed border-amber-500/40 bg-amber-500/5 rounded-md p-3 flex items-start gap-3">
-                <Wand2 className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-                <div className="flex-1 space-y-2">
+            {!result.success && isAdmin && !aiFixAutoMode && (
+              <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Wand2 className="h-4 w-4 text-purple-500 shrink-0" />
                   <div>
-                    <div className="text-sm font-semibold">Let AI try to fix this</div>
+                    <div className="text-sm font-semibold">JARVIS Bug Fix</div>
                     <p className="text-xs text-muted-foreground">
-                      The AI will read the error and the script source and propose a corrected version. You can review the changes before applying.
+                      JARVIS will analyze the error, patch the code, and re-run automatically — like Replit's AI fix.
                     </p>
                   </div>
-                  <Button size="sm" onClick={requestAiFix} disabled={aiFixLoading}>
-                    {aiFixLoading ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Wand2 className="mr-2 h-3 w-3" />}
-                    Fix with AI
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={fixAndRerun} disabled={aiFixLoading}>
+                    {aiFixLoading
+                      ? <><Loader2 className="mr-2 h-3 w-3 animate-spin" />Analyzing…</>
+                      : <><Wand2 className="mr-2 h-3 w-3" />Fix &amp; Re-run</>}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={requestAiFix} disabled={aiFixLoading}>
+                    Review fix first
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {!result.success && isAdmin && aiFixAutoMode && (
+              <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-2">
+                {aiFixLoading && (
+                  <div className="flex items-center gap-2 text-sm text-purple-600 dark:text-purple-400">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    <span>JARVIS is reading the error and fixing the code…</span>
+                  </div>
+                )}
+                {!aiFixLoading && aiFixApplied && aiFixProposal && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-purple-600 dark:text-purple-400">
+                      <Wand2 className="h-4 w-4 shrink-0" />
+                      JARVIS fixed the code — re-running now…
+                    </div>
+                    <p className="text-xs text-foreground/80">{aiFixProposal.diagnosis}</p>
+                    {aiFixProposal.changes.length > 0 && (
+                      <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                        {aiFixProposal.changes.slice(0, 5).map((c, i) => <li key={i}>{c}</li>)}
+                        {aiFixProposal.changes.length > 5 && (
+                          <li className="list-none text-muted-foreground/60">+{aiFixProposal.changes.length - 5} more changes</li>
+                        )}
+                      </ul>
+                    )}
+                    <div className="flex items-center gap-2 pt-1">
+                      <Badge
+                        variant={aiFixProposal.confidence === "high" ? "default" : aiFixProposal.confidence === "medium" ? "secondary" : "outline"}
+                        className="text-[10px]"
+                      >
+                        {aiFixProposal.confidence} confidence
+                      </Badge>
+                      {aiFixProvider && <Badge variant="outline" className="text-[10px]">{aiFixProvider}</Badge>}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1389,10 +1491,25 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 {aiFixApplied ? "Close" : "Cancel"}
               </Button>
               {aiFixProposal && !aiFixApplied && (
-                <Button onClick={applyAiFix} disabled={aiFixApplying}>
-                  {aiFixApplying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                  Apply fix
-                </Button>
+                <>
+                  <Button variant="outline" onClick={applyAiFix} disabled={aiFixApplying}>
+                    {aiFixApplying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    Apply only
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      await applyAiFix();
+                      setAiFixOpen(false);
+                      setAiFixAutoMode(true);
+                      setAiFixApplied(true);
+                      executeNow();
+                    }}
+                    disabled={aiFixApplying}
+                  >
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    Apply &amp; Re-run
+                  </Button>
+                </>
               )}
             </DialogFooter>
           </DialogContent>
