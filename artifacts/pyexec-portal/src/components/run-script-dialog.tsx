@@ -13,8 +13,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2, Sparkles, ShieldAlert } from "lucide-react";
+import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2, Sparkles, ShieldAlert, Wand2, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+
+type AiFixProposal = {
+  diagnosis: string;
+  rootCause: string;
+  changes: string[];
+  fixedCode: string;
+  confidence: "low" | "medium" | "high";
+  notes?: string;
+  generatedAt: string;
+};
 
 type DetectedArg = {
   name: string;
@@ -144,6 +155,16 @@ function makeInitArgs(schema: InputsSchema): Record<string, string> {
 
 export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, initialResult, initialSchema }: Props) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+
+  const [aiFixOpen, setAiFixOpen] = useState(false);
+  const [aiFixLoading, setAiFixLoading] = useState(false);
+  const [aiFixApplying, setAiFixApplying] = useState(false);
+  const [aiFixProposal, setAiFixProposal] = useState<AiFixProposal | null>(null);
+  const [aiFixProvider, setAiFixProvider] = useState<string | null>(null);
+  const [aiFixOriginal, setAiFixOriginal] = useState<string | null>(null);
+  const [aiFixApplied, setAiFixApplied] = useState(false);
   const [schema, setSchema] = useState<InputsSchema | null>(initialSchema ?? null);
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -478,6 +499,59 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       toast({ title: "Failed to install dependencies", description: String(e), variant: "destructive" });
     } finally {
       setInstallingDeps(false);
+    }
+  }
+
+  async function requestAiFix() {
+    if (!result) return;
+    setAiFixOpen(true);
+    setAiFixApplied(false);
+    setAiFixProposal(null);
+    setAiFixProvider(null);
+    setAiFixOriginal(null);
+    setAiFixLoading(true);
+    try {
+      const r = await fetch(`/api/scripts/${scriptId}/ai-fix-error`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          stderr: result.stderr,
+          stdout: result.stdout,
+          exitCode: result.exitCode,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setAiFixProposal(j.proposal);
+      setAiFixProvider(j.provider ?? null);
+      setAiFixOriginal(j.originalCode ?? null);
+    } catch (e: any) {
+      toast({ title: "AI fix failed", description: e?.message || String(e), variant: "destructive" });
+      setAiFixOpen(false);
+    } finally {
+      setAiFixLoading(false);
+    }
+  }
+
+  async function applyAiFix() {
+    if (!aiFixProposal) return;
+    setAiFixApplying(true);
+    try {
+      const r = await fetch(`/api/scripts/${scriptId}/ai-fix-error/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ fixedCode: aiFixProposal.fixedCode }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setAiFixApplied(true);
+      toast({ title: "Fix applied", description: "The script code has been updated. Try running it again." });
+    } catch (e: any) {
+      toast({ title: "Apply failed", description: e?.message || String(e), variant: "destructive" });
+    } finally {
+      setAiFixApplying(false);
     }
   }
 
@@ -1074,8 +1148,118 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             {!result.stdout && !result.stderr && (
               <p className="text-xs italic text-muted-foreground">No output produced.</p>
             )}
+            {!result.success && isAdmin && (
+              <div className="border border-dashed border-amber-500/40 bg-amber-500/5 rounded-md p-3 flex items-start gap-3">
+                <Wand2 className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <div className="text-sm font-semibold">Let AI try to fix this</div>
+                    <p className="text-xs text-muted-foreground">
+                      The AI will read the error and the script source and propose a corrected version. You can review the changes before applying.
+                    </p>
+                  </div>
+                  <Button size="sm" onClick={requestAiFix} disabled={aiFixLoading}>
+                    {aiFixLoading ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Wand2 className="mr-2 h-3 w-3" />}
+                    Fix with AI
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
+        <Dialog open={aiFixOpen} onOpenChange={(o) => { if (!aiFixApplying) setAiFixOpen(o); }}>
+          <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Wand2 className="h-4 w-4 text-amber-500" />
+                AI Fix Proposal
+                {aiFixProvider && (
+                  <Badge variant="outline" className="ml-2 text-xs">{aiFixProvider}</Badge>
+                )}
+              </DialogTitle>
+              <DialogDescription>
+                Review the AI's analysis and proposed fix for <span className="font-medium">{scriptName}</span>. Nothing is changed until you click Apply.
+              </DialogDescription>
+            </DialogHeader>
+
+            {aiFixLoading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
+                <Loader2 className="h-4 w-4 animate-spin" /> Analysing the error and the script…
+              </div>
+            )}
+
+            {!aiFixLoading && aiFixProposal && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs font-semibold text-muted-foreground mb-1">Diagnosis</div>
+                    <p className="text-sm">{aiFixProposal.diagnosis}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs font-semibold text-muted-foreground mb-1">Root cause</div>
+                    <p className="text-sm">{aiFixProposal.rootCause || "—"}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Confidence:</span>
+                  <Badge
+                    variant={aiFixProposal.confidence === "high" ? "default" : aiFixProposal.confidence === "medium" ? "secondary" : "outline"}
+                  >
+                    {aiFixProposal.confidence}
+                  </Badge>
+                  {aiFixOriginal && (
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {aiFixOriginal.length} → {aiFixProposal.fixedCode.length} chars
+                    </span>
+                  )}
+                </div>
+
+                {aiFixProposal.changes.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-muted-foreground mb-1">Changes</div>
+                    <ul className="text-sm list-disc pl-5 space-y-1">
+                      {aiFixProposal.changes.map((c, i) => <li key={i}>{c}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {aiFixProposal.notes && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+                    <span className="font-semibold">Notes: </span>{aiFixProposal.notes}
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-xs font-semibold text-muted-foreground mb-1">Proposed code</div>
+                  <pre className="bg-black text-green-400 p-3 rounded text-xs font-mono whitespace-pre-wrap max-h-80 overflow-auto">
+                    {aiFixProposal.fixedCode}
+                  </pre>
+                </div>
+
+                {aiFixApplied && (
+                  <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm flex items-center gap-2">
+                    <Check className="h-4 w-4 text-emerald-500" />
+                    Fix applied. Close this and click <span className="font-semibold">Run Again</span> to try the new code.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setAiFixOpen(false)} disabled={aiFixApplying}>
+                {aiFixApplied ? "Close" : "Cancel"}
+              </Button>
+              {aiFixProposal && !aiFixApplied && (
+                <Button onClick={applyAiFix} disabled={aiFixApplying}>
+                  {aiFixApplying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                  Apply fix
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>

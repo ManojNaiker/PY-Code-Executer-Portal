@@ -8,6 +8,7 @@ import executionsRouter from "./executions";
 import auditRouter from "./audit";
 import authRouter from "./auth";
 import aiEnhanceRouter from "./aiEnhance";
+import aiFixErrorRouter from "./aiFixError";
 import settingsRouter from "./settings";
 import foldersRouter from "./folders";
 
@@ -21,6 +22,7 @@ router.use(scriptsRouter);
 router.use(scriptFilesRouter);
 router.use(executionsRouter);
 router.use(aiEnhanceRouter);
+router.use(aiFixErrorRouter);
 router.use(auditRouter);
 router.use(settingsRouter);
 router.use(foldersRouter);
