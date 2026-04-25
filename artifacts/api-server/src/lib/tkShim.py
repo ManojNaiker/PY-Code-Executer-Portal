@@ -35,9 +35,13 @@ _LIST_OPTIONS_FUNC = (os.environ.get("PYEXEC_TK_LIST_OPTIONS") or "").strip()
 def _lookup(*keys):
     for k in keys:
         if not k: continue
-        v = _FIELDS.get(str(k).strip().lower())
-        if v not in (None, ""):
-            return v
+        raw = str(k).strip().lower()
+        # Try exact match first, then strip trailing colon/whitespace variants
+        # e.g. prompt "Enter Username:" must match stored key "Enter Username"
+        for candidate in (raw, raw.rstrip(":：").strip()):
+            v = _FIELDS.get(candidate)
+            if v not in (None, ""):
+                return v
     return None
 
 # ------------------------ tk variables ------------------------
