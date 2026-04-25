@@ -11,6 +11,38 @@ import { detectLanguage } from "../lib/scriptLanguage";
 
 const router = Router();
 
+const LOGO_FILE_RE = /logo\.(png|jpe?g|ico|gif|svg|bmp|webp)\b/i;
+const LOGO_VAR_RE = /\b(logo_?path|logo_?file|icon_?path|icon_?file|logo_?url)\b/i;
+const ICON_CALL_RE = /\b(iconbitmap|iconphoto|set_window_icon|setWindowIcon|setIcon)\s*\(/i;
+
+/**
+ * Defensive scrub: drop any line that hard-codes a logo / icon file reference.
+ * The platform owns the logo through scripts.logo_path + the logo upload UI.
+ * Empty try/except shells left behind by line removal are also collapsed.
+ */
+function stripHardcodedLogoPaths(code: string): { code: string; removed: string[] } {
+  const lines = code.split(/\r?\n/);
+  const kept: string[] = [];
+  const removed: string[] = [];
+  for (const ln of lines) {
+    const trimmed = ln.trim();
+    const looksLikeLogo =
+      LOGO_FILE_RE.test(ln) ||
+      LOGO_VAR_RE.test(ln) ||
+      (ICON_CALL_RE.test(ln) && /["'][^"']*\.(png|jpe?g|ico|gif|svg|bmp|webp)["']/i.test(ln));
+    if (looksLikeLogo && trimmed.length > 0) {
+      removed.push(trimmed.slice(0, 200));
+      continue;
+    }
+    kept.push(ln);
+  }
+  // Collapse `try:\n  pass / no body / only comments` blocks left empty by removal.
+  const cleaned = kept
+    .join("\n")
+    .replace(/^([ \t]*)try\s*:\s*\n(?:\1[ \t]+(?:#[^\n]*|pass)\s*\n)*\1except[^\n]*:\s*\n(?:\1[ \t]+(?:#[^\n]*|pass)\s*\n)*/gm, "");
+  return { code: cleaned, removed };
+}
+
 export type AiFieldHint = {
   label: string;
   friendlyLabel?: string;
@@ -84,6 +116,19 @@ You must also improve the Python script. Make it more robust, production-ready, 
 6. Return the COMPLETE improved Python script in "enhancedCode"
 7. List each improvement in "codeChanges" array (short bullets)
 
+PART B.1 — REMOVE HARDCODED LOGO PATHS (IMPORTANT)
+PyExec Portal manages script logos / icons separately via the script's "logoPath" attribute and the file-upload UI. Hardcoded logo / icon paths inside the source are ALWAYS wrong and must be stripped:
+- Remove any hardcoded references to logo / icon files such as:
+    * \`tk.PhotoImage(file="…logo.png")\`, \`PhotoImage(file=…)\`, \`iconbitmap("…logo.ico")\`, \`iconphoto(...)\`
+    * \`Image.open("…logo.…")\`, \`logo_path = "…"\`, \`LOGO_PATH = …\`, \`logo_file = …\`, \`ICON_PATH = …\`
+    * Any literal path/URL ending in \`logo.png\` / \`logo.jpg\` / \`logo.jpeg\` / \`logo.ico\` / \`logo.gif\` / \`logo.svg\`, regardless of folder
+    * Any line that loads, displays, or sets a window icon to a logo file
+- Remove the offending statements (and the surrounding load/try block if it becomes empty). Do NOT just comment them out.
+- If the logo was assigned to a variable, drop the variable entirely; do not leave dead references.
+- If the only purpose of an import (e.g. \`from PIL import Image\`) was the removed logo line, drop the unused import as well.
+- Add one bullet to "codeChanges" that says: "Removed hardcoded logo path — handled by the platform via the script's logoPath attribute."
+- Never re-introduce a logo path in the enhanced code under any circumstance.
+
 PART C — WARNINGS
 In "warnings", flag:
 - Destructive or irreversible operations (bulk writes, deletes, API mutations)
@@ -144,6 +189,14 @@ CODE ENHANCEMENT
 6. Respect the language's conventions and idioms (do not, for example, convert PowerShell to Python).
 7. Return the COMPLETE improved ${langName} file in "enhancedCode".
 8. List each improvement in "codeChanges" array (short bullets, 3-10 items).
+
+REMOVE HARDCODED LOGO PATHS (IMPORTANT)
+PyExec Portal manages script logos / icons separately via the script's "logoPath" attribute and the file-upload UI. Hardcoded logo / icon paths inside the source are ALWAYS wrong and must be stripped:
+- Remove any line that loads, sets or displays a logo / window-icon file (e.g. references to *logo.png / *logo.jpg / *logo.ico / *logo.svg / *logo.gif, or variables named logo_path, LOGO_PATH, logo_file, ICON_PATH, etc.).
+- Remove the offending statements entirely. Do NOT just comment them out.
+- If the only purpose of an import was the removed logo line, drop the unused import as well.
+- Add one bullet to "codeChanges" that says: "Removed hardcoded logo path — handled by the platform via the script's logoPath attribute."
+- Never re-introduce a logo path in the enhanced code under any circumstance.
 
 WARNINGS
 In "warnings", flag:
@@ -265,8 +318,23 @@ Respond with ONLY the JSON object described in the system prompt.`;
     }
 
     // Extract enhanced code separately (don't persist it in aiSchema blob)
-    const enhancedCode: string | undefined = (parsedSchema as any).enhancedCode;
+    let enhancedCode: string | undefined = (parsedSchema as any).enhancedCode;
     delete (parsedSchema as any).enhancedCode;
+
+    // Defensive scrub: remove any hardcoded logo / icon path the model may have
+    // left behind. The platform owns the logo via scripts.logo_path.
+    let logoLinesRemoved: string[] = [];
+    if (enhancedCode && enhancedCode.trim().length > 0) {
+      const stripped = stripHardcodedLogoPaths(enhancedCode);
+      enhancedCode = stripped.code;
+      logoLinesRemoved = stripped.removed;
+      if (logoLinesRemoved.length > 0) {
+        const note = "Removed hardcoded logo path — handled by the platform via the script's logoPath attribute.";
+        const list = parsedSchema.codeChanges ?? [];
+        if (!list.some((c) => /logo path/i.test(c))) list.push(note);
+        parsedSchema.codeChanges = list;
+      }
+    }
 
     // Mark reconciliation metadata
     parsedSchema.codeEnhanced = !!(enhancedCode && enhancedCode.trim().length > 50);
@@ -310,6 +378,7 @@ Respond with ONLY the JSON object described in the system prompt.`;
         reconciledFields: parsedSchema.reconciledFields?.length ?? 0,
         codeEnhanced: parsedSchema.codeEnhanced,
         codeChanges: parsedSchema.codeChanges?.length ?? 0,
+        logoLinesRemoved: logoLinesRemoved.length,
       },
     });
 
