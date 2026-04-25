@@ -814,6 +814,68 @@ export function parseTkinterForm(code: string): TkForm {
     fields.push({ label, kind: "checkbox" });
   }
 
+  // --- simpledialog.askstring / askinteger / askfloat (popup input dialogs) ---
+  // These are detected by matching calls like:
+  //   simpledialog.askstring("Title", "Enter Username:")
+  //   simpledialog.askinteger("Input", "Port number:")
+  //   simpledialog.askfloat("Input", "Amount:")
+  // The shim resolves these via _lookup(prompt, title) from PYEXEC_TK_INPUTS.fields
+  {
+    const re = /(?:simpledialog\s*\.\s*)(askstring|askinteger|askfloat)\s*\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(code))) {
+      const fnName = m[1];
+      const callStart = m.index + m[0].length;
+      let depth = 1;
+      let inStr: string | null = null;
+      let body = "";
+      let i = callStart;
+      while (i < code.length && depth > 0) {
+        const c = code[i];
+        const prev = i > 0 ? code[i - 1] : "";
+        if (inStr) { if (c === inStr && prev !== "\\") inStr = null; body += c; }
+        else if (c === '"' || c === "'") { inStr = c; body += c; }
+        else if (c === "(") { depth++; body += c; }
+        else if (c === ")") { depth--; if (depth === 0) break; body += c; }
+        else body += c;
+        i++;
+      }
+
+      // Parse positional args: first = title, second = prompt
+      const parts: string[] = [];
+      let pDepth = 0;
+      let pStr: string | null = null;
+      let cur = "";
+      for (let j = 0; j < body.length; j++) {
+        const c = body[j];
+        const prev = j > 0 ? body[j - 1] : "";
+        if (pStr) { cur += c; if (c === pStr && prev !== "\\") pStr = null; continue; }
+        if (c === '"' || c === "'") { pStr = c; cur += c; continue; }
+        if (c === "(" || c === "[" || c === "{") { pDepth++; cur += c; continue; }
+        if (c === ")" || c === "]" || c === "}") { pDepth--; cur += c; continue; }
+        if (c === "," && pDepth === 0) { parts.push(cur.trim()); cur = ""; continue; }
+        cur += c;
+      }
+      if (cur.trim()) parts.push(cur.trim());
+
+      // Extract prompt (2nd positional arg) and optional show kwarg
+      const promptRaw = parts[1] ?? parts[0] ?? "";
+      const prompt = stripQuotes(promptRaw).replace(/[:：]\s*$/, "").trim();
+      if (!prompt) continue;
+
+      // Detect password: show="*" or show='*'
+      const showKw = parts.find(p => /^\s*show\s*=/.test(p));
+      const isPassword = showKw ? /["']\s*\*\s*["']/.test(showKw) : false;
+
+      const kind: TkField["kind"] =
+        fnName === "askinteger" || fnName === "askfloat" ? "number"
+        : isPassword ? "password"
+        : "text";
+
+      fields.push({ label: prompt, kind });
+    }
+  }
+
   // --- Text / CTkTextbox blocks (free-form input) ---
   for (const call of findCalls(code, ["Text", "CTkTextbox", "ScrolledText"])) {
     const kw = extractKwargs(call.body);
