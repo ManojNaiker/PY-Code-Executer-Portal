@@ -2,11 +2,11 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { scriptsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { parseScriptInputs } from "../lib/scriptParser";
+import { aiGenerateText } from "../lib/aiClient";
 
 const router = Router();
 
@@ -126,15 +126,11 @@ ${trimmedCode}
 
 Respond with ONLY the JSON object described in the system prompt.`;
 
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
+    const { text } = await aiGenerateText({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt,
+      maxTokens: 8192,
     });
-
-    const block = message.content[0];
-    const text = block && block.type === "text" ? block.text : "";
 
     let parsedSchema: AiEnhancedSchema | null = null;
     try {

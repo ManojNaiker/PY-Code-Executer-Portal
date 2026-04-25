@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Mail, Send, Save, Loader2, Settings as SettingsIcon } from "lucide-react";
+import { Mail, Send, Save, Loader2, Settings as SettingsIcon, Bot } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 
 type SmtpSettings = {
@@ -19,6 +19,35 @@ type SmtpSettings = {
   hasPassword: boolean;
   updatedAt: string;
 } | null;
+
+type AiProvider = "anthropic" | "openai" | "grok";
+type AiSettingsResponse = {
+  settings: {
+    id: number;
+    provider: AiProvider;
+    baseUrl: string | null;
+    model: string | null;
+    hasApiKey: boolean;
+    updatedAt: string;
+  } | null;
+  replitDefault: { provider: AiProvider; available: boolean };
+};
+
+const PROVIDER_LABELS: Record<AiProvider, string> = {
+  anthropic: "Anthropic (Claude)",
+  openai: "OpenAI (ChatGPT)",
+  grok: "xAI Grok",
+};
+const PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-4o-mini",
+  grok: "grok-2-latest",
+};
+const PROVIDER_KEY_HELP: Record<AiProvider, string> = {
+  anthropic: "Get a key at console.anthropic.com → API Keys",
+  openai: "Get a key at platform.openai.com → API Keys",
+  grok: "Get a key at console.x.ai → API Keys",
+};
 
 export default function AdminSettings() {
   const { toast } = useToast();
@@ -36,6 +65,65 @@ export default function AdminSettings() {
   const [fromName, setFromName] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [testTo, setTestTo] = useState("");
+
+  // ---------------- AI provider settings ----------------
+  const [aiLoading, setAiLoading] = useState(true);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiResp, setAiResp] = useState<AiSettingsResponse | null>(null);
+  const [aiProvider, setAiProvider] = useState<AiProvider>("anthropic");
+  const [aiModel, setAiModel] = useState("");
+  const [aiBaseUrl, setAiBaseUrl] = useState("");
+  const [aiApiKey, setAiApiKey] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/settings/ai", { credentials: "include" });
+        if (r.status === 403) return;
+        const j: AiSettingsResponse = await r.json();
+        if (cancelled) return;
+        setAiResp(j);
+        const s = j.settings;
+        const provider = (s?.provider as AiProvider) || j.replitDefault.provider || "anthropic";
+        setAiProvider(provider);
+        setAiModel(s?.model || "");
+        setAiBaseUrl(s?.baseUrl || "");
+      } catch (e: any) {
+        toast({ title: "Failed to load AI settings", description: e?.message || String(e), variant: "destructive" });
+      } finally {
+        if (!cancelled) setAiLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleSaveAi() {
+    setAiSaving(true);
+    try {
+      const body: any = {
+        provider: aiProvider,
+        model: aiModel.trim() || null,
+        baseUrl: aiBaseUrl.trim() || null,
+      };
+      if (aiApiKey.length > 0) body.apiKey = aiApiKey;
+      const r = await fetch("/api/settings/ai", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setAiResp(j as AiSettingsResponse);
+      setAiApiKey("");
+      toast({ title: "AI settings saved" });
+    } catch (e: any) {
+      toast({ title: "Failed to save AI settings", description: e?.message || String(e), variant: "destructive" });
+    } finally {
+      setAiSaving(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -206,6 +294,100 @@ export default function AdminSettings() {
                 <Button onClick={handleSave} disabled={saving || !host.trim() || !fromEmail.trim()}>
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save settings
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="border-t pt-8">
+          <div className="flex items-center gap-2 mb-1">
+            <Bot className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-semibold">AI Provider</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-5">
+            Choose which AI to use for the “Enhance with AI” feature. While this app runs on Replit, you can leave the
+            API key blank and it will use the built-in Anthropic key automatically. When you self-host or move locally,
+            switch to your preferred provider and paste your own API key.
+          </p>
+          {aiLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="ai-provider">Provider</Label>
+                  <select
+                    id="ai-provider"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={aiProvider}
+                    onChange={(e) => setAiProvider(e.target.value as AiProvider)}
+                  >
+                    {(Object.keys(PROVIDER_LABELS) as AiProvider[]).map((p) => (
+                      <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ai-model">Model <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <Input
+                    id="ai-model"
+                    placeholder={PROVIDER_DEFAULT_MODEL[aiProvider]}
+                    value={aiModel}
+                    onChange={(e) => setAiModel(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="ai-key">
+                    API Key{" "}
+                    {aiResp?.settings?.hasApiKey && (
+                      <span className="text-xs text-muted-foreground">(saved — leave blank to keep)</span>
+                    )}
+                  </Label>
+                  <Input
+                    id="ai-key"
+                    type="password"
+                    placeholder={
+                      aiResp?.settings?.hasApiKey
+                        ? "••••••••"
+                        : (aiProvider === "anthropic" && aiResp?.replitDefault?.available
+                            ? "Optional — Replit Anthropic key is being used by default"
+                            : "Paste your API key")
+                    }
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">{PROVIDER_KEY_HELP[aiProvider]}</p>
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="ai-baseurl">Base URL <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <Input
+                    id="ai-baseurl"
+                    placeholder={
+                      aiProvider === "anthropic"
+                        ? "https://api.anthropic.com (defaults to Replit proxy when blank)"
+                        : aiProvider === "openai"
+                          ? "https://api.openai.com/v1"
+                          : "https://api.x.ai/v1"
+                    }
+                    value={aiBaseUrl}
+                    onChange={(e) => setAiBaseUrl(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {aiProvider === "anthropic" && aiResp?.replitDefault?.available && !aiResp?.settings?.hasApiKey && (
+                <div className="text-xs rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-muted-foreground">
+                  Currently using the built-in Replit Anthropic key. No setup required while you're on Replit.
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <Button onClick={handleSaveAi} disabled={aiSaving}>
+                  {aiSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save AI settings
                 </Button>
               </div>
             </div>

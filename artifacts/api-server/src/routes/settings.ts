@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { db, smtpSettingsTable, usersTable } from "@workspace/db";
+import { db, smtpSettingsTable, aiSettingsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { testSmtp } from "../lib/email";
+import { hasReplitAnthropicEnv } from "../lib/aiClient";
 
 const router = Router();
 
@@ -105,6 +106,89 @@ router.post("/settings/smtp/test", requireAuth, async (req, res) => {
   const result = await testSmtp({ host, port, secure, username, password, to });
   if (!result.ok) return res.status(400).json({ error: result.error || "Failed to send test email" });
   res.json({ ok: true });
+});
+
+// ===================== AI provider settings =====================
+
+const ALLOWED_PROVIDERS = new Set(["anthropic", "openai", "grok"]);
+const REPLIT_DEFAULT_PROVIDER = "anthropic";
+
+function sanitizeAi(row: any) {
+  if (!row) return null;
+  const { apiKey, ...rest } = row;
+  return {
+    ...rest,
+    hasApiKey: Boolean(apiKey && String(apiKey).length > 0),
+    updatedAt: row.updatedAt?.toISOString?.() ?? row.updatedAt,
+  };
+}
+
+router.get("/settings/ai", requireAuth, async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  try {
+    const rows = await db.select().from(aiSettingsTable).limit(1);
+    const row = rows[0] ?? null;
+    res.json({
+      settings: sanitizeAi(row),
+      replitDefault: {
+        // While running on Replit, the Anthropic integration provides a key
+        // automatically. Frontend uses this to hint that no key is required.
+        provider: REPLIT_DEFAULT_PROVIDER,
+        available: hasReplitAnthropicEnv(),
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "Error reading AI settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/settings/ai", requireAuth, async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+
+  const body = req.body || {};
+  const provider = String(body.provider || "").trim().toLowerCase();
+  if (!ALLOWED_PROVIDERS.has(provider)) {
+    return res.status(400).json({ error: "provider must be one of: anthropic, openai, grok" });
+  }
+  const baseUrl = body.baseUrl ? String(body.baseUrl).trim() || null : null;
+  const model = body.model ? String(body.model).trim() || null : null;
+
+  try {
+    const existing = (await db.select().from(aiSettingsTable).limit(1))[0];
+    let row;
+    if (existing) {
+      const updates: any = { provider, baseUrl, model, updatedAt: new Date() };
+      // Only overwrite the API key when a new value (or explicit clear) was sent.
+      if (typeof body.apiKey === "string") {
+        updates.apiKey = body.apiKey.length > 0 ? body.apiKey : null;
+      }
+      [row] = await db.update(aiSettingsTable).set(updates).where(eq(aiSettingsTable.id, existing.id)).returning();
+    } else {
+      const apiKey = typeof body.apiKey === "string" && body.apiKey.length > 0 ? body.apiKey : null;
+      [row] = await db.insert(aiSettingsTable).values({ provider, apiKey, baseUrl, model }).returning();
+    }
+
+    await logAudit({
+      req,
+      userId: admin.clerkId,
+      userEmail: admin.email,
+      action: "settings.ai_update",
+      resourceType: "settings",
+      resourceId: "ai",
+      details: { provider, model, hasKey: Boolean(row?.apiKey) },
+    });
+
+    res.json({
+      settings: sanitizeAi(row),
+      replitDefault: { provider: REPLIT_DEFAULT_PROVIDER, available: hasReplitAnthropicEnv() },
+    });
+  } catch (err) {
+    req.log.error({ err }, "Error saving AI settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 export default router;

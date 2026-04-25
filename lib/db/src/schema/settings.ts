@@ -18,3 +18,16 @@ export const smtpSettingsTable = pgTable("smtp_settings", {
 export const insertSmtpSettingsSchema = createInsertSchema(smtpSettingsTable).omit({ id: true, updatedAt: true });
 export type InsertSmtpSettings = z.infer<typeof insertSmtpSettingsSchema>;
 export type SmtpSettings = typeof smtpSettingsTable.$inferSelect;
+
+export const aiSettingsTable = pgTable("ai_settings", {
+  id: serial("id").primaryKey(),
+  provider: text("provider").notNull().default("anthropic"),
+  apiKey: text("api_key"),
+  baseUrl: text("base_url"),
+  model: text("model"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAiSettingsSchema = createInsertSchema(aiSettingsTable).omit({ id: true, updatedAt: true });
+export type InsertAiSettings = z.infer<typeof insertAiSettingsSchema>;
+export type AiSettings = typeof aiSettingsTable.$inferSelect;
