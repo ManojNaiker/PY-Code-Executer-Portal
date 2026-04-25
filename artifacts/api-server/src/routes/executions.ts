@@ -13,6 +13,7 @@ import multer from "multer";
 import { parseScriptInputs, type HardcodedPath } from "../lib/scriptParser";
 import { ensureDependencies, getDepsDir, checkDependencies, installDependencies, type DepInstallResult } from "../lib/pythonDeps";
 import tkShimSource from "../lib/tkShim.py";
+import { detectLanguage, type ScriptLanguage } from "../lib/scriptLanguage";
 
 const router = Router();
 
@@ -47,7 +48,26 @@ function applyPathOverrides(
   return { code: out, replaced };
 }
 
-async function runPython(
+function unrunnableResult(lang: ScriptLanguage, executionTimeMs = 0): {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  executionTimeMs: number;
+  deps: DepInstallResult;
+} {
+  return {
+    success: false,
+    stdout: "",
+    stderr: `[runtime] ${lang.displayName} cannot be executed on this server.\n${lang.unrunnableReason ?? "No interpreter available."}\n\nJARVIS can still review and fix the file — open the AI Fix or AI Enhance panel.`,
+    exitCode: -1,
+    executionTimeMs,
+    deps: { installed: [], failed: [], skipped: [] },
+  };
+}
+
+async function runScript(
+  lang: ScriptLanguage,
   code: string,
   args: string[] = [],
   stdin?: string | null,
@@ -62,13 +82,16 @@ async function runPython(
   executionTimeMs: number;
   deps: DepInstallResult;
 }> {
+  if (!lang.runnable || !lang.interpreter) {
+    return unrunnableResult(lang);
+  }
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pyexec-"));
 
-  // If GUI inputs were provided, prepend the headless tkinter shim so widget
-  // calls map onto our stubs and mainloop() invokes the user-selected button.
-  const useShim = !!tkInputs;
+  // Tkinter shim only applies to Python.
+  const isPython = lang.id === "python";
+  const useShim = isPython && !!tkInputs;
   const finalCode = useShim ? `${tkShimSource}\n# === USER SCRIPT ===\n${code}` : code;
-  const scriptPath = path.join(tmpDir, "script.py");
+  const scriptPath = path.join(tmpDir, `${lang.filePrefix}${lang.fileExt}`);
   await fs.writeFile(scriptPath, finalCode, "utf-8");
 
   let finalArgs = [...args];
@@ -78,19 +101,23 @@ async function runPython(
     uploadedFilePath = path.join(tmpDir, safeName);
     await fs.writeFile(uploadedFilePath, fileBuffer);
     if (!useShim) {
-      // For non-GUI scripts, file path is appended to argv as before.
       finalArgs.push(uploadedFilePath);
     }
   }
 
-  const deps = await ensureDependencies(code);
+  // Only Python uses pip-based dependency auto-install.
+  const deps: DepInstallResult = isPython
+    ? await ensureDependencies(code)
+    : { installed: [], failed: [], skipped: [] };
 
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: os.tmpdir(),
     TMPDIR: os.tmpdir(),
-    PYTHONPATH: getDepsDir(),
   };
+  if (isPython) {
+    env.PYTHONPATH = getDepsDir();
+  }
   if (useShim) {
     env.PYEXEC_TK_INPUTS = JSON.stringify({
       fields: tkInputs?.fields ?? {},
@@ -102,7 +129,7 @@ async function runPython(
 
   const start = Date.now();
   return new Promise((resolve) => {
-    const proc = spawn("python3", [scriptPath, ...finalArgs], {
+    const proc = spawn(lang.interpreter!, [...lang.interpreterArgs, scriptPath, ...finalArgs], {
       timeout: 600000,
       env,
       cwd: tmpDir,
@@ -297,6 +324,52 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
 
   send({ type: "status", message: "Preparing execution environment..." });
 
+  const lang = detectLanguage(script.filename, script.code);
+  send({ type: "status", message: `Detected language: ${lang.displayName}` });
+
+  if (!lang.runnable || !lang.interpreter) {
+    const stderrMsg = `[runtime] ${lang.displayName} cannot be executed on this server.\n${lang.unrunnableReason ?? "No interpreter available."}\n\nJARVIS can still review and fix the file — open the AI Fix or AI Enhance panel.`;
+    send({ type: "stderr", data: stderrMsg + "\n" });
+    let executionId: number | null = null;
+    try {
+      const [execution] = await db.insert(executionsTable).values({
+        scriptId: id,
+        executedBy: userId,
+        success: false,
+        stdout: "",
+        stderr: stderrMsg.slice(0, 10000),
+        exitCode: -1,
+        executionTimeMs: 0,
+      }).returning();
+      executionId = execution.id;
+      await logAudit({
+        req, userId, userEmail: me.email,
+        action: "script.execute_unsupported",
+        resourceType: "script", resourceId: id,
+        details: { scriptName: script.name, language: lang.id },
+      });
+    } catch (e: any) {
+      req.log.error({ err: e }, "Failed to record unsupported-language execution");
+    }
+    send({
+      type: "done",
+      result: {
+        success: false,
+        stdout: "",
+        stderr: stderrMsg,
+        exitCode: -1,
+        executionTimeMs: 0,
+        executionId,
+        deps: { installed: [], failed: [], skipped: [] },
+        language: lang.id,
+        languageDisplayName: lang.displayName,
+      },
+    });
+    if (!res.writableEnded) res.end();
+    return;
+  }
+
+  const isPython = lang.id === "python";
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pyexec-"));
 
   // Save extra path-override files and build code substitutions
@@ -319,9 +392,9 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     }
   }
 
-  const useShim = !!tkInputs;
+  const useShim = isPython && !!tkInputs;
   const finalCode = useShim ? `${tkShimSource}\n# === USER SCRIPT ===\n${userCode}` : userCode;
-  const scriptPath = path.join(tmpDir, "script.py");
+  const scriptPath = path.join(tmpDir, `${lang.filePrefix}${lang.fileExt}`);
   await fs.writeFile(scriptPath, finalCode, "utf-8");
 
   let finalArgs = [...args.map(String)];
@@ -344,14 +417,17 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     }
   }
 
-  send({ type: "status", message: "Checking Python dependencies..." });
-  const deps = await ensureDependencies(script.code);
-  if (deps.installed.length > 0) {
-    send({ type: "status", message: `Installed packages: ${deps.installed.join(", ")}` });
-  }
-  if (deps.failed.length > 0) {
-    for (const f of deps.failed) {
-      send({ type: "stderr", data: `[deps] Failed to install ${f.pkg}: ${f.error.slice(0, 200)}\n` });
+  let deps: DepInstallResult = { installed: [], failed: [], skipped: [] };
+  if (isPython) {
+    send({ type: "status", message: "Checking Python dependencies..." });
+    deps = await ensureDependencies(script.code);
+    if (deps.installed.length > 0) {
+      send({ type: "status", message: `Installed packages: ${deps.installed.join(", ")}` });
+    }
+    if (deps.failed.length > 0) {
+      for (const f of deps.failed) {
+        send({ type: "stderr", data: `[deps] Failed to install ${f.pkg}: ${f.error.slice(0, 200)}\n` });
+      }
     }
   }
 
@@ -359,9 +435,11 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     PATH: process.env.PATH ?? "",
     HOME: os.tmpdir(),
     TMPDIR: os.tmpdir(),
-    PYTHONPATH: getDepsDir(),
-    PYTHONUNBUFFERED: "1",
   };
+  if (isPython) {
+    env.PYTHONPATH = getDepsDir();
+    env.PYTHONUNBUFFERED = "1";
+  }
   if (useShim) {
     env.PYEXEC_TK_INPUTS = JSON.stringify({
       fields: tkInputs?.fields ?? {},
@@ -371,11 +449,12 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     if (uploadedFilePath) env.PYEXEC_TK_FILE = uploadedFilePath;
   }
 
-  send({ type: "status", message: `Running: python3 script.py ${finalArgs.join(" ")}`.trim() });
+  const cmdline = [lang.interpreter, ...lang.interpreterArgs, path.basename(scriptPath), ...finalArgs].join(" ");
+  send({ type: "status", message: `Running: ${cmdline}` });
 
   const start = Date.now();
   const EXEC_TIMEOUT_MS = 30 * 60 * 1000;
-  const proc = spawn("python3", ["-u", scriptPath, ...finalArgs], {
+  const proc = spawn(lang.interpreter!, [...lang.interpreterArgs, scriptPath, ...finalArgs], {
     timeout: EXEC_TIMEOUT_MS,
     env,
     cwd: tmpDir,
@@ -544,9 +623,11 @@ router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (r
     }
     if (!Array.isArray(args)) args = [];
 
-    await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name, hasFile: !!file, gui: !!tkInputs } });
+    const lang = detectLanguage(script.filename, script.code);
+    await logAudit({ req, userId, userEmail: me.email, action: "script.execute_start", resourceType: "script", resourceId: id, details: { scriptName: script.name, hasFile: !!file, gui: !!tkInputs, language: lang.id } });
 
-    const result = await runPython(
+    const result = await runScript(
+      lang,
       script.code,
       args.map(String),
       stdin,

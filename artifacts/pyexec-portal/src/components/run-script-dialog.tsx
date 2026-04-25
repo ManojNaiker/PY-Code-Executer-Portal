@@ -886,7 +886,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
           <div className="rounded-md border p-3 space-y-2 bg-muted/30">
             <div className="flex items-center gap-2">
               <Package className="h-4 w-4 text-primary" />
-              <span className="text-sm font-semibold">Python Dependencies</span>
+              <span className="text-sm font-semibold">Dependencies</span>
               {deps && deps.length > 0 && (
                 <Badge variant="outline" className="ml-auto text-[10px]">
                   {deps.filter((d) => d.installed).length}/{deps.length} installed

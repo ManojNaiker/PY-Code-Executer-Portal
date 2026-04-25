@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { aiGenerateText } from "../lib/aiClient";
+import { detectLanguage } from "../lib/scriptLanguage";
 
 const router = Router();
 
@@ -16,30 +17,51 @@ export type AiFixProposal = {
   fixedCode: string;
   confidence: "low" | "medium" | "high";
   notes?: string;
+  language?: string;
   generatedAt: string;
 };
 
-const SYSTEM_PROMPT = `You are an expert Python debugging engineer. The user will give you a Python script and the error output it produced when executed. Your job is to diagnose the problem and produce a corrected, runnable version of the full script.
+function buildSystemPrompt(languageName: string, fenceTag: string, runnable: boolean, unrunnableReason: string | undefined): string {
+  const langSpecific: Record<string, string> = {
+    Python: "- Preserve the script's input/argparse/Tkinter form contract — do not rename CLI args, form labels, or button labels.",
+    "Bash / Shell": "- Quote variable expansions properly. Use `set -euo pipefail` only if the original script already does.",
+    "JavaScript (Node.js)": "- Keep CommonJS vs ESM style consistent with the original. Do not convert require ↔ import.",
+    PowerShell: "- Preserve param() blocks, parameter names, types and validation attributes exactly.",
+    "Windows Batch": "- Use the .bat / .cmd dialect of cmd.exe. Use REM for comments. Preserve label names and goto targets.",
+    VBScript: "- Use classic VBScript syntax (Dim, Set, CreateObject, WScript.*). No .NET-specific constructs.",
+    "VBA / Office Macro": "- Use VBA for Office syntax. Preserve Sub / Function / End Sub structure and any Option Explicit / Option Compare directives.",
+    HTML: "- Keep the existing CSS class names, ids and JavaScript event handler names intact. Do not strip user content.",
+    SQL: "- Preserve table and column names exactly. Do not invent new objects unless they are clearly missing from the original schema.",
+  };
+  const guidance = langSpecific[languageName] ?? "- Preserve the script's structure, identifiers and external contracts (function names, CLI args, ids).";
+  const runtimeNote = runnable
+    ? `The script is run with the appropriate ${languageName} interpreter on the server.`
+    : `IMPORTANT: ${unrunnableReason ?? `${languageName} cannot be executed directly on this server`} The "error output" you receive is the server's explanation, NOT a runtime error from the interpreter. Focus on improving the source itself — fixing syntax, logic, modernising APIs, and making it ready to run on its native platform.`;
+
+  return `You are an expert ${languageName} engineer and debugger. The user will give you a ${languageName} file and the error output associated with it. Your job is to diagnose the problem and produce a corrected, runnable version of the full file.
+
+${runtimeNote}
 
 You MUST respond with ONLY a valid JSON object (no prose, no markdown fences) matching this TypeScript shape:
 {
   "diagnosis": string,        // 1-3 sentences in plain English: what went wrong
-  "rootCause": string,        // 1 sentence: the underlying cause (e.g. "NameError: variable used before assignment")
+  "rootCause": string,        // 1 sentence: the underlying cause
   "changes": string[],        // bullet list (3-8 items) of the specific edits you made
-  "fixedCode": string,        // the COMPLETE corrected Python source — full file, ready to save and run
+  "fixedCode": string,        // the COMPLETE corrected ${languageName} source — full file, ready to save and run
   "confidence": "low" | "medium" | "high",
   "notes": string             // optional: caveats, things the user should verify
 }
 
 Rules:
-- Always return the FULL fixed script in "fixedCode", not a diff or snippet.
-- Keep the original script's structure and intent. Make the smallest change that fixes the error.
-- Do not invent new dependencies unless absolutely required. If you must, mention it in "notes".
-- If the error is environmental (missing file, missing env var, network down), explain that in "diagnosis" and return the original code with comments at the top describing what to fix outside the script. Set confidence to "low".
-- If the script is already correct and the error looks transient, say so in "diagnosis", set confidence to "low", and return the original code unchanged.
-- Preserve the script's input/argparse/Tkinter form contract — do not rename CLI args, form labels, or button labels.
+- Always return the FULL fixed file in "fixedCode", not a diff or snippet.
+- Keep the original file's structure and intent. Make the smallest change that fixes the error.
+- Do not invent new dependencies / imports / modules / external scripts unless absolutely required. If you must, mention it in "notes".
+- If the error is environmental (missing file, missing env var, network down, missing interpreter), explain that in "diagnosis" and return the original code with a clear ${fenceTag || "code"}-style comment at the top describing what to fix outside the file. Set confidence to "low".
+- If the file is already correct and the error looks transient or caused by the runtime/host, say so in "diagnosis", set confidence to "low", and return the original code unchanged.
+${guidance}
 - Never include API keys, secrets, or hardcoded credentials in the fix.
 - Output JSON only.`;
+}
 
 router.post("/scripts/:id/ai-fix-error", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
@@ -65,14 +87,20 @@ router.post("/scripts/:id/ai-fix-error", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Provide stderr, stdout, or exitCode from the failed run." });
     }
 
+    const lang = detectLanguage(script.filename, script.code);
+    const commentToken = lang.comment;
+    const truncationComment = `${commentToken} ...[truncated for AI prompt]`;
     const trimmedCode = script.code.length > 16000
-      ? script.code.slice(0, 16000) + "\n# ...[truncated for AI prompt]"
+      ? script.code.slice(0, 16000) + "\n" + truncationComment
       : script.code;
     const trimmedStderr = stderr.length > 6000 ? stderr.slice(-6000) : stderr;
     const trimmedStdout = stdout.length > 4000 ? stdout.slice(-4000) : stdout;
 
-    const userPrompt = `Script name: ${script.name}
-Filename: ${script.filename}
+    const SYSTEM_PROMPT = buildSystemPrompt(lang.displayName, lang.fenceTag, lang.runnable, lang.unrunnableReason);
+
+    const userPrompt = `File name: ${script.name}
+Filename on disk: ${script.filename}
+Detected language: ${lang.displayName}
 Description: ${script.description ?? "(none)"}
 Exit code: ${exitCode ?? "(unknown)"}
 
@@ -82,8 +110,8 @@ ${trimmedStderr || "(empty)"}
 --- STDOUT (last lines) ---
 ${trimmedStdout || "(empty)"}
 
---- PYTHON SOURCE ---
-\`\`\`python
+--- ${lang.displayName.toUpperCase()} SOURCE ---
+\`\`\`${lang.fenceTag}
 ${trimmedCode}
 \`\`\`
 
@@ -108,6 +136,7 @@ Diagnose and return ONLY the JSON object described in the system prompt.`;
             fixedCode: String(obj.fixedCode),
             confidence: ["low", "medium", "high"].includes(obj.confidence) ? obj.confidence : "medium",
             notes: typeof obj.notes === "string" ? obj.notes : undefined,
+            language: lang.displayName,
             generatedAt: new Date().toISOString(),
           };
         }

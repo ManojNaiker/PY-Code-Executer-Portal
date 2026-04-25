@@ -36,12 +36,31 @@ Enterprise Python Code Execution Platform. Users can upload Python scripts, orga
 ### JARVIS Auto-Fix (Replit/Grok-style auto error resolver)
 - When an admin runs a script and it fails, JARVIS automatically:
   1. Reads `stderr`/`exitCode`
-  2. Calls Anthropic to diagnose + produce a corrected full script (`/ai-fix-error`)
+  2. Calls Anthropic to diagnose + produce a corrected full file (`/ai-fix-error`)
   3. Persists the fix (`/ai-fix-error/apply`)
   4. Re-runs the script and re-evaluates
   5. Repeats up to `MAX_AUTO_FIX_ATTEMPTS = 3` (defined in `run-script-dialog.tsx`)
 - The dialog shows an "Auto-Fix Timeline" with each attempt's diagnosis, changes, confidence, and outcome (`Fixed` / `Still failing` / `JARVIS error`).
 - Auto-mode is ON by default for admins, can be toggled off per-dialog. Non-admins see a hint that they need an admin to enable auto-fix (since persisting the fix writes to `scripts.code`).
+
+### Multi-language support (JARVIS works on all common script types)
+- Language is detected from the file extension first, then a content sniff (shebangs, common keywords).
+- Recognised languages and their behaviour on this Linux server:
+  | Language | Extensions | Execution | JARVIS fix / enhance |
+  | --- | --- | --- | --- |
+  | Python | `.py`, `.pyw` | `python3 -u` (with auto pip install + Tkinter shim) | yes |
+  | Bash / Shell | `.sh`, `.bash`, `.zsh` | `bash` | yes |
+  | JavaScript | `.js`, `.mjs`, `.cjs` | `node` | yes |
+  | TypeScript | `.ts` | `npx -y tsx` | yes |
+  | Ruby / Perl / PHP | `.rb`, `.pl`, `.php` | their interpreter if installed | yes |
+  | PowerShell | `.ps1`, `.psm1` | `pwsh` (only if installed) | yes |
+  | Windows Batch | `.bat`, `.cmd` | not runnable on Linux — friendly stderr | yes |
+  | VBScript | `.vbs` | not runnable on Linux | yes |
+  | VBA / Office Macro | `.bas`, `.cls`, `.frm`, `.vba` | not runnable on Linux | yes |
+  | HTML | `.html`, `.htm` | not server-executable (browser-rendered) | yes |
+  | SQL | `.sql` | not runnable here (needs DB) | yes (review) |
+- Implementation lives in `artifacts/api-server/src/lib/scriptLanguage.ts` (registry + detector). The execution route, AI fix-error and AI enhance routes all use this registry to pick the right interpreter and craft a language-aware system prompt.
+- For non-runnable languages, the execute endpoint returns a friendly "cannot run on this server" stderr instead of crashing — JARVIS auto-fix then kicks in and produces a corrected file the user can run on its native platform (Windows, Excel, browser, etc.).
 
 ### Database (`lib/db`)
 Tables:

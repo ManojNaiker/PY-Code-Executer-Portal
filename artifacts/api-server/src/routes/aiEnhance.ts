@@ -7,6 +7,7 @@ import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
 import { parseScriptInputs } from "../lib/scriptParser";
 import { aiGenerateText } from "../lib/aiClient";
+import { detectLanguage } from "../lib/scriptLanguage";
 
 const router = Router();
 
@@ -130,6 +131,45 @@ Critical rules:
 - enhancedCode must be COMPLETE runnable Python — never truncate it
 - If you cannot improve the code meaningfully, still return it unchanged in enhancedCode`;
 
+const GENERIC_SYSTEM_PROMPT = (langName: string, fenceTag: string, runnable: boolean, unrunnableReason: string | undefined) => `You are JARVIS — an expert ${langName} engineer embedded inside PyExec Portal, an enterprise script execution platform.
+
+Your job when called with a ${langName} file is to make it more robust, production-ready, and informative.
+
+CODE ENHANCEMENT
+1. Add clear progress logging using the language's idiomatic output mechanism.
+2. Add error handling around any I/O, network call, file operation, external command or destructive operation.
+3. Add input validation (check files exist, parameters are not empty, expected types, etc.).
+4. Improve error messages — be specific about what went wrong and how to fix it.
+5. Keep all existing logic exactly intact — only ADD improvements, never remove or change core functionality.
+6. Respect the language's conventions and idioms (do not, for example, convert PowerShell to Python).
+7. Return the COMPLETE improved ${langName} file in "enhancedCode".
+8. List each improvement in "codeChanges" array (short bullets, 3-10 items).
+
+WARNINGS
+In "warnings", flag:
+- Destructive or irreversible operations (bulk writes, deletes, API mutations, registry changes, sending emails, etc.)
+- External API calls and what data they send
+- Hardcoded credentials, tenant IDs, environment-specific paths or magic numbers
+- Anything that requires special privileges (admin, sudo, root)
+- Any remaining risks the user should know before running
+
+${runnable ? "" : `RUNTIME NOTE: ${unrunnableReason ?? `${langName} cannot be executed directly on this server.`} Still produce the best possible enhanced source — the user will run it on its native platform.`}
+
+You MUST respond with ONLY a valid JSON object (no markdown, no prose):
+{
+  "scriptTitle": string,
+  "scriptSummary": string,
+  "warnings": string[],
+  "enhancedCode": string,
+  "codeChanges": string[]
+}
+
+Critical rules:
+- enhancedCode must be COMPLETE runnable ${langName} — never truncate it
+- The code fence for the file is \`\`\`${fenceTag || "text"}
+- If you cannot improve the code meaningfully, still return it unchanged in enhancedCode and explain why in scriptSummary
+- Do not invent dependencies or imports unless absolutely required`;
+
 router.post("/scripts/:id/ai-enhance", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
   const id = parseInt(req.params.id);
@@ -144,23 +184,30 @@ router.post("/scripts/:id/ai-enhance", requireAuth, async (req, res) => {
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
 
-    const parsed = parseScriptInputs(script.code);
-
-    const currentFields = parsed.tkForm?.fields.map((f) => ({ label: f.label, kind: f.kind })) ?? [];
-
-    const summary = {
-      args: parsed.args.map((a) => ({ label: a.label, type: a.type, help: a.help, required: a.required })),
-      currentParsedFields: currentFields,
-      tkActions: parsed.tkForm?.actions.map((a) => ({ label: a.label })) ?? [],
-      hasFile: !!parsed.file || !!parsed.tkForm?.needsFile,
-      hardcodedPaths: parsed.hardcodedPaths.map((p) => ({ literal: p.literal, path: p.path, kind: p.kind, func: p.func })),
-    };
-
+    const lang = detectLanguage(script.filename, script.code);
+    const isPython = lang.id === "python";
+    const truncationComment = `${lang.comment} ...[truncated]`;
     const trimmedCode = script.code.length > 16000
-      ? script.code.slice(0, 16000) + "\n# ...[truncated]"
+      ? script.code.slice(0, 16000) + "\n" + truncationComment
       : script.code;
 
-    const userPrompt = `Script name: ${script.name}
+    let systemPrompt: string;
+    let userPrompt: string;
+
+    if (isPython) {
+      // Python: full reconciliation flow (uses Tkinter / argparse parser)
+      const parsed = parseScriptInputs(script.code);
+      const currentFields = parsed.tkForm?.fields.map((f) => ({ label: f.label, kind: f.kind })) ?? [];
+      const summary = {
+        args: parsed.args.map((a) => ({ label: a.label, type: a.type, help: a.help, required: a.required })),
+        currentParsedFields: currentFields,
+        tkActions: parsed.tkForm?.actions.map((a) => ({ label: a.label })) ?? [],
+        hasFile: !!parsed.file || !!parsed.tkForm?.needsFile,
+        hardcodedPaths: parsed.hardcodedPaths.map((p) => ({ literal: p.literal, path: p.path, kind: p.kind, func: p.func })),
+      };
+
+      systemPrompt = SYSTEM_PROMPT;
+      userPrompt = `Script name: ${script.name}
 Existing description: ${script.description ?? "(none)"}
 
 CURRENT PARSER OUTPUT (may be wrong or incomplete — you must verify against the source):
@@ -177,9 +224,28 @@ ${trimmedCode}
 \`\`\`
 
 Respond with ONLY the JSON object described in the system prompt.`;
+    } else {
+      // Generic enhancement — no Python-specific field reconciliation
+      systemPrompt = GENERIC_SYSTEM_PROMPT(lang.displayName, lang.fenceTag, lang.runnable, lang.unrunnableReason);
+      userPrompt = `File name: ${script.name}
+Filename on disk: ${script.filename}
+Detected language: ${lang.displayName}
+Existing description: ${script.description ?? "(none)"}
+
+INSTRUCTION:
+- Improve this ${lang.displayName} file as described in the system prompt.
+- Return the COMPLETE improved file in "enhancedCode".
+
+${lang.displayName} source:
+\`\`\`${lang.fenceTag}
+${trimmedCode}
+\`\`\`
+
+Respond with ONLY the JSON object described in the system prompt.`;
+    }
 
     const { text } = await aiGenerateText({
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       userPrompt,
       maxTokens: 16000,
     });
