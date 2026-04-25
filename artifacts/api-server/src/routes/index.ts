@@ -9,6 +9,7 @@ import auditRouter from "./audit";
 import authRouter from "./auth";
 import aiEnhanceRouter from "./aiEnhance";
 import aiFixErrorRouter from "./aiFixError";
+import dynamicOptionsRouter from "./dynamicOptions";
 import settingsRouter from "./settings";
 import foldersRouter from "./folders";
 
@@ -23,6 +24,7 @@ router.use(scriptFilesRouter);
 router.use(executionsRouter);
 router.use(aiEnhanceRouter);
 router.use(aiFixErrorRouter);
+router.use(dynamicOptionsRouter);
 router.use(auditRouter);
 router.use(settingsRouter);
 router.use(foldersRouter);

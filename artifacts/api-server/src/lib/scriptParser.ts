@@ -33,6 +33,9 @@ export type TkField = {
   kind: "text" | "password" | "number" | "select" | "checkbox" | "textarea";
   choices?: string[];
   default?: string;
+  /** When non-empty, the choices for a select must be fetched at runtime by
+   * calling this Python function from the user script (e.g. "get_s3_buckets"). */
+  dynamicOptionsFunc?: string;
 };
 
 export type TkAction = {
@@ -607,6 +610,54 @@ function lastLabelTextBefore(code: string, beforeIndex: number): string | null {
   return lastText;
 }
 
+/** Walk back from a call's start index and find `varname =` assigning the call. */
+function assignedVarNameBefore(code: string, beforeIndex: number): string | null {
+  // Allow whitespace before the call. We look at the line that contains beforeIndex.
+  // Find the start of that line.
+  let lineStart = beforeIndex;
+  while (lineStart > 0 && code[lineStart - 1] !== "\n") lineStart--;
+  const head = code.slice(lineStart, beforeIndex);
+  // Match: optional indent + IDENT + (optional .attr) + = + (optional whitespace)
+  const m = head.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*$/);
+  if (m) return m[1];
+  // Or "ttk.var = ..." → use last segment as best-effort
+  const m2 = head.match(/^\s*[A-Za-z_][A-Za-z0-9_.]*\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*$/);
+  if (m2) return m2[1];
+  return null;
+}
+
+/** Find a deferred values assignment for a Combobox-style variable. Returns the
+ * raw RHS expression (without trailing newline) or null. */
+function findDeferredValuesAssignment(code: string, varName: string): string | null {
+  const v = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Pattern A: varname['values'] = <expr>      varname["values"] = <expr>
+  const reA = new RegExp(`${v}\\s*\\[\\s*['"]values['"]\\s*\\]\\s*=\\s*([^\\n;]+)`, "g");
+  const mA = reA.exec(code);
+  if (mA) return mA[1].trim();
+  // Pattern B: varname.configure(values=<expr>)  or .config(values=<expr>)
+  const reB = new RegExp(`${v}\\s*\\.\\s*config(?:ure)?\\s*\\(([^)]*)\\)`, "g");
+  let mB: RegExpExecArray | null;
+  while ((mB = reB.exec(code))) {
+    const kw = extractKwargs(mB[1]);
+    if (kw.values) return kw.values.trim();
+  }
+  return null;
+}
+
+/** From an RHS like "get_s3_buckets()" or "self.fetch_things()" return the
+ * function name (last identifier before parens), else null. */
+function extractFunctionName(rhs: string): string | null {
+  const t = rhs.trim();
+  // simple call: name(...)
+  const m = t.match(/^([A-Za-z_][A-Za-z0-9_.]*)\s*\(/);
+  if (!m) return null;
+  const segments = m[1].split(".");
+  const fn = segments[segments.length - 1];
+  // ignore obvious built-ins / non-functions
+  if (!fn || /^(list|tuple|set|str|int|float|dict|sorted|reversed|range)$/.test(fn)) return null;
+  return fn;
+}
+
 function parseChoicesList(raw: string): string[] | undefined {
   const t = raw.trim();
   if (!(t.startsWith("[") && t.endsWith("]")) && !(t.startsWith("(") && t.endsWith(")"))) return undefined;
@@ -665,15 +716,38 @@ export function parseTkinterForm(code: string): TkForm {
   // --- Combobox / OptionMenu / CTkComboBox / CTkOptionMenu ---
   for (const call of findCalls(code, ["Combobox", "OptionMenu", "CTkComboBox", "CTkOptionMenu", "Spinbox", "CTkSpinbox"])) {
     const kw = extractKwargs(call.body);
-    const choices = kw.values ? parseChoicesList(kw.values) : undefined;
+    let choices: string[] | undefined = kw.values ? parseChoicesList(kw.values) : undefined;
+    let dynamicOptionsFunc: string | undefined;
+
+    // Find the variable name this widget is bound to: `varname = ttk.Combobox(...)`
+    const varName = assignedVarNameBefore(code, call.index);
+    if (varName) {
+      // Look for deferred assignments that populate the dropdown options:
+      //   varname['values'] = [...]            (literal list)
+      //   varname['values'] = some_func()      (dynamic — runtime call)
+      //   varname.configure(values=[...])
+      //   varname.config(values=some_func())
+      const deferred = findDeferredValuesAssignment(code, varName);
+      if (deferred) {
+        const lit = parseChoicesList(deferred);
+        if (lit && lit.length > 0) {
+          choices = lit;
+        } else {
+          const fn = extractFunctionName(deferred);
+          if (fn) dynamicOptionsFunc = fn;
+        }
+      }
+    }
+
     const label =
       lastLabelTextBefore(code, call.index) ||
       (kw.name ? stripQuotes(kw.name) : "") ||
       "Select";
     fields.push({
       label,
-      kind: choices && choices.length > 0 ? "select" : "text",
+      kind: "select",
       choices,
+      dynamicOptionsFunc,
     });
   }
 

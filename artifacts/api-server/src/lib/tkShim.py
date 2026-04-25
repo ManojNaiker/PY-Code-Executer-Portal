@@ -26,6 +26,11 @@ except Exception:
 _FIELDS = { (k or "").strip().lower(): v for k, v in (_IN.get("fields") or {}).items() }
 _FILE = _IN.get("file") or os.environ.get("PYEXEC_TK_FILE") or ""
 _ACTION = (_IN.get("action") or "").strip().lower()
+# When this env var is set, the shim's mainloop() will instead try to call the
+# named function from the user script's __main__ globals and print the result
+# as JSON to stdout, then exit. This is used by the "dynamic dropdown options"
+# endpoint to populate Combobox values that are computed at runtime.
+_LIST_OPTIONS_FUNC = (os.environ.get("PYEXEC_TK_LIST_OPTIONS") or "").strip()
 
 def _lookup(*keys):
     for k in keys:
@@ -243,6 +248,36 @@ class _Button(_Widget):
 
 class _Tk(_Widget):
     def mainloop(self):
+        # Dynamic-options mode: look up a function in __main__ globals, call it
+        # and emit its result as JSON to stdout, then exit. Used by the dynamic
+        # Combobox-options endpoint.
+        if _LIST_OPTIONS_FUNC:
+            try:
+                import __main__ as _m
+                fn = getattr(_m, _LIST_OPTIONS_FUNC, None)
+                if not callable(fn):
+                    print(json.dumps({"__pyexec_options_error__": f"function {_LIST_OPTIONS_FUNC!r} not found"}))
+                    sys.exit(0)
+                try:
+                    result = fn()
+                except Exception as e:
+                    print(json.dumps({"__pyexec_options_error__": f"{type(e).__name__}: {e}"}))
+                    sys.exit(0)
+                if isinstance(result, dict):
+                    items = list(result.keys())
+                elif isinstance(result, (list, tuple, set)):
+                    items = list(result)
+                else:
+                    items = [result]
+                items = [str(x) for x in items]
+                print(json.dumps({"__pyexec_options__": items}))
+            except Exception as e:
+                try:
+                    print(json.dumps({"__pyexec_options_error__": f"{type(e).__name__}: {e}"}))
+                except Exception:
+                    pass
+            sys.exit(0)
+
         # Pick a button to invoke
         if not _BUTTONS:
             return

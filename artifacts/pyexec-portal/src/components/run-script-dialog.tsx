@@ -59,6 +59,7 @@ type TkField = {
   kind: "text" | "password" | "number" | "select" | "checkbox" | "textarea";
   choices?: string[];
   default?: string;
+  dynamicOptionsFunc?: string;
 };
 
 type TkAction = { label: string };
@@ -165,6 +166,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [aiFixProvider, setAiFixProvider] = useState<string | null>(null);
   const [aiFixOriginal, setAiFixOriginal] = useState<string | null>(null);
   const [aiFixApplied, setAiFixApplied] = useState(false);
+  const [dynamicOptionsLoading, setDynamicOptionsLoading] = useState<Record<string, boolean>>({});
+  const [dynamicOptionsError, setDynamicOptionsError] = useState<Record<string, string>>({});
   const [schema, setSchema] = useState<InputsSchema | null>(initialSchema ?? null);
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -251,6 +254,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
         setInputValues(new Array(data.inputs.length).fill(""));
         setTkValues(initTkValues(data));
         setTkAction(data.tkForm?.actions?.[0]?.label ?? "");
+        loadDynamicOptions(data);
       })
       .catch((e) => {
         toast({ title: "Failed to load script inputs", description: String(e), variant: "destructive" });
@@ -258,6 +262,47 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       })
       .finally(() => setLoadingSchema(false));
   }, [open, scriptId, initialResult, initialSchema]);
+
+  async function loadDynamicOptions(s: InputsSchema) {
+    const fields = s.tkForm?.fields ?? [];
+    const targets = fields.filter((f) => f.kind === "select" && f.dynamicOptionsFunc && (!f.choices || f.choices.length === 0));
+    if (targets.length === 0) return;
+    setDynamicOptionsLoading((p) => {
+      const next = { ...p };
+      for (const f of targets) next[f.label] = true;
+      return next;
+    });
+    await Promise.all(targets.map(async (f) => {
+      try {
+        const r = await fetch(`/api/scripts/${scriptId}/dynamic-options`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ func: f.dynamicOptionsFunc }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setDynamicOptionsError((p) => ({ ...p, [f.label]: j.detail || j.error || `HTTP ${r.status}` }));
+          return;
+        }
+        const opts: string[] = Array.isArray(j.options) ? j.options : [];
+        setSchema((cur) => {
+          if (!cur || !cur.tkForm) return cur;
+          return {
+            ...cur,
+            tkForm: {
+              ...cur.tkForm,
+              fields: cur.tkForm.fields.map((x) => x.label === f.label ? { ...x, choices: opts } : x),
+            },
+          };
+        });
+      } catch (e: any) {
+        setDynamicOptionsError((p) => ({ ...p, [f.label]: e?.message || String(e) }));
+      } finally {
+        setDynamicOptionsLoading((p) => { const next = { ...p }; delete next[f.label]; return next; });
+      }
+    }));
+  }
 
   const hasTkForm = !!schema?.tkForm && (
     schema.tkForm.fields.length > 0 ||
@@ -720,7 +765,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                         <span className="font-mono">{hint.example}</span>
                       </p>
                     )}
-                    {f.kind === "select" && f.choices ? (
+                    {f.kind === "select" && (f.choices && f.choices.length > 0) ? (
                       <select
                         id={`tk-${f.label}`}
                         className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
@@ -732,6 +777,32 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
+                    ) : f.kind === "select" && dynamicOptionsLoading[f.label] ? (
+                      <div className="w-full h-10 px-3 rounded-md border border-input bg-muted/40 text-sm flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Loading options from script…
+                      </div>
+                    ) : f.kind === "select" && f.dynamicOptionsFunc ? (
+                      <div className="space-y-1">
+                        <Input
+                          id={`tk-${f.label}`}
+                          value={tkValues[f.label] ?? ""}
+                          placeholder={`Type ${f.label.toLowerCase()} (auto-load failed)`}
+                          onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                        />
+                        {dynamicOptionsError[f.label] && (
+                          <p className="text-[11px] text-amber-500">
+                            Couldn't auto-load options ({dynamicOptionsError[f.label]}). You can type the value manually.
+                          </p>
+                        )}
+                      </div>
+                    ) : f.kind === "select" ? (
+                      <Input
+                        id={`tk-${f.label}`}
+                        value={tkValues[f.label] ?? ""}
+                        placeholder={`Type ${f.label.toLowerCase()}`}
+                        onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
+                      />
                     ) : f.kind === "checkbox" ? (
                       <select
                         id={`tk-${f.label}`}
