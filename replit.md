@@ -15,22 +15,33 @@ Enterprise Python Code Execution Platform. Users can upload Python scripts, orga
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
-- **Auth**: Clerk (via `@clerk/express` + `@clerk/react`)
+- **Auth**: Local JWT + bcrypt session cookie (`pyexec_session`). Seeded admin: `admin@pyexec.com` / `admin@123`.
+- **AI**: Anthropic Claude (Sonnet 4.6) via the Replit AI Integrations blueprint (`AI_INTEGRATIONS_ANTHROPIC_API_KEY`)
 - **Frontend**: React + Vite + Tailwind CSS + shadcn/ui + wouter routing
 
 ## Architecture
 
 ### Frontend (`artifacts/pyexec-portal`)
 - Dark-navy corporate UI
-- Clerk-authenticated with user sync to local DB
+- Local session-cookie auth, user record in local DB
 - Routes: /, /dashboard, /scripts, /scripts/:id, /upload, /admin/departments, /admin/users, /admin/audit
-- /sign-in, /sign-up for Clerk auth pages
+- /sign-in for the local login form
 
 ### Backend (`artifacts/api-server`)
 - Express 5 API server
-- Clerk proxy middleware for auth
-- Routes: /api/departments, /api/users, /api/scripts, /api/scripts/:id/execute, /api/audit-logs, /api/dashboard/stats, /api/auth/sync
-- Python execution via child_process spawn (python3)
+- Local session middleware (JWT cookie)
+- Routes: /api/departments, /api/users, /api/scripts, /api/scripts/:id/execute, /api/scripts/:id/execute-stream, /api/scripts/:id/ai-fix-error, /api/scripts/:id/ai-fix-error/apply, /api/scripts/:id/ai-enhance, /api/audit-logs, /api/dashboard/stats, /api/auth/login, /api/auth/me
+- Python execution via child_process spawn (python3); streaming responses via NDJSON
+
+### JARVIS Auto-Fix (Replit/Grok-style auto error resolver)
+- When an admin runs a script and it fails, JARVIS automatically:
+  1. Reads `stderr`/`exitCode`
+  2. Calls Anthropic to diagnose + produce a corrected full script (`/ai-fix-error`)
+  3. Persists the fix (`/ai-fix-error/apply`)
+  4. Re-runs the script and re-evaluates
+  5. Repeats up to `MAX_AUTO_FIX_ATTEMPTS = 3` (defined in `run-script-dialog.tsx`)
+- The dialog shows an "Auto-Fix Timeline" with each attempt's diagnosis, changes, confidence, and outcome (`Fixed` / `Still failing` / `JARVIS error`).
+- Auto-mode is ON by default for admins, can be toggled off per-dialog. Non-admins see a hint that they need an admin to enable auto-fix (since persisting the fix writes to `scripts.code`).
 
 ### Database (`lib/db`)
 Tables:

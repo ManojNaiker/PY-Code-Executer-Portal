@@ -27,6 +27,19 @@ type AiFixProposal = {
   generatedAt: string;
 };
 
+const MAX_AUTO_FIX_ATTEMPTS = 3;
+
+type AiFixHistoryEntry = {
+  attempt: number;
+  diagnosis: string;
+  rootCause: string;
+  changes: string[];
+  confidence: "low" | "medium" | "high";
+  provider: string | null;
+  outcome: "applied" | "fixed" | "still_failing" | "error";
+  error?: string;
+};
+
 type DetectedArg = {
   name: string;
   flag: string | null;
@@ -175,11 +188,18 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [aiFixOpen, setAiFixOpen] = useState(false);
   const [aiFixLoading, setAiFixLoading] = useState(false);
   const [aiFixApplying, setAiFixApplying] = useState(false);
-  const [aiFixAutoMode, setAiFixAutoMode] = useState(false);
+  // JARVIS Auto-Fix is ON by default for admins (Replit/Grok-style auto error resolver).
+  // Non-admins can't write to scripts.code so it stays off for them.
+  const [aiFixAutoMode, setAiFixAutoMode] = useState(true);
   const [aiFixProposal, setAiFixProposal] = useState<AiFixProposal | null>(null);
   const [aiFixProvider, setAiFixProvider] = useState<string | null>(null);
   const [aiFixOriginal, setAiFixOriginal] = useState<string | null>(null);
   const [aiFixApplied, setAiFixApplied] = useState(false);
+  // Auto-fix loop tracking
+  const [aiFixAttempt, setAiFixAttempt] = useState(0);
+  const [aiFixHistory, setAiFixHistory] = useState<AiFixHistoryEntry[]>([]);
+  const [aiFixGaveUp, setAiFixGaveUp] = useState(false);
+  const aiFixHandledForRef = useRef<string | null>(null);
   const [dynamicOptionsLoading, setDynamicOptionsLoading] = useState<Record<string, boolean>>({});
   const [dynamicOptionsError, setDynamicOptionsError] = useState<Record<string, string>>({});
   const [schema, setSchema] = useState<InputsSchema | null>(initialSchema ?? null);
@@ -240,7 +260,11 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setLiveLog([]);
       setAiFixProposal(null);
       setAiFixApplied(false);
-      setAiFixAutoMode(false);
+      setAiFixAutoMode(true);
+      setAiFixAttempt(0);
+      setAiFixHistory([]);
+      setAiFixGaveUp(false);
+      aiFixHandledForRef.current = null;
       return;
     }
     setDepsLoading(true);
@@ -363,6 +387,10 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       (schema.hardcodedPaths?.length ?? 0) > 0;
     if (!needsAnyInput) {
       autoRanRef.current = true;
+      setAiFixAttempt(0);
+      setAiFixHistory([]);
+      setAiFixGaveUp(false);
+      aiFixHandledForRef.current = null;
       executeNow();
     }
   }, [open, schema, loadingSchema, running, result, hasTkForm]);
@@ -617,6 +645,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
 
   async function fixAndRerun() {
     if (!result) return;
+    const attemptNo = aiFixAttempt + 1;
+    setAiFixAttempt(attemptNo);
     setAiFixAutoMode(true);
     setAiFixApplied(false);
     setAiFixProposal(null);
@@ -624,7 +654,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     setAiFixOriginal(null);
     setAiFixLoading(true);
     try {
-      // Step 1 — JARVIS analyses the error and proposes a fix
+      // Step 1 — JARVIS analyses the latest error and proposes a fix
       const r = await fetch(`/api/scripts/${scriptId}/ai-fix-error`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -638,11 +668,26 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       const proposal: AiFixProposal = j.proposal;
+      const provider: string | null = j.provider ?? null;
       setAiFixProposal(proposal);
-      setAiFixProvider(j.provider ?? null);
+      setAiFixProvider(provider);
       setAiFixOriginal(j.originalCode ?? null);
 
-      // Step 2 — Auto-apply the fix
+      // Record this attempt in the timeline (outcome will be updated after re-run)
+      setAiFixHistory((prev) => [
+        ...prev,
+        {
+          attempt: attemptNo,
+          diagnosis: proposal.diagnosis,
+          rootCause: proposal.rootCause,
+          changes: proposal.changes,
+          confidence: proposal.confidence,
+          provider,
+          outcome: "applied",
+        },
+      ]);
+
+      // Step 2 — Auto-apply the fix to the script
       const applyRes = await fetch(`/api/scripts/${scriptId}/ai-fix-error/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -653,20 +698,69 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       if (!applyRes.ok) throw new Error(applyJ.error || `HTTP ${applyRes.status}`);
       setAiFixApplied(true);
     } catch (e: any) {
-      toast({ title: "JARVIS fix failed", description: e?.message || String(e), variant: "destructive" });
-      setAiFixAutoMode(false);
+      const msg = e?.message || String(e);
+      toast({ title: "JARVIS fix failed", description: msg, variant: "destructive" });
+      // Record the error as a terminal entry in the timeline
+      setAiFixHistory((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.attempt === attemptNo) {
+          return prev.map((h, i) => i === prev.length - 1 ? { ...h, outcome: "error", error: msg } : h);
+        }
+        return [
+          ...prev,
+          { attempt: attemptNo, diagnosis: "—", rootCause: "—", changes: [], confidence: "low", provider: null, outcome: "error", error: msg },
+        ];
+      });
+      setAiFixGaveUp(true);
     } finally {
       setAiFixLoading(false);
     }
   }
 
-  // After fixAndRerun applies the fix, automatically re-run
+  // After fixAndRerun applies the fix, re-run ONCE (consume aiFixApplied so we don't loop here).
   useEffect(() => {
     if (aiFixAutoMode && aiFixApplied && !aiFixLoading && !running) {
+      setAiFixApplied(false);
       executeNow();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiFixAutoMode, aiFixApplied, aiFixLoading]);
+
+  // Auto-fix loop: when a run completes with a failure and auto-mode is on,
+  // mark the latest history entry's outcome and chain another JARVIS attempt
+  // (up to MAX_AUTO_FIX_ATTEMPTS). This makes JARVIS behave like Replit/Grok —
+  // it keeps reading the error, fixing the code, and re-running until smooth.
+  useEffect(() => {
+    if (!result) return;
+    if (!aiFixAutoMode || !isAdmin) return;
+    if (aiFixLoading || running) return;
+
+    // Update the latest history entry with the outcome of the just-finished run.
+    setAiFixHistory((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      if (last.outcome !== "applied") return prev;
+      return prev.map((h, i) => i === prev.length - 1
+        ? { ...h, outcome: result.success ? "fixed" : "still_failing" }
+        : h);
+    });
+
+    if (result.success) return;
+    if (aiFixAttempt >= MAX_AUTO_FIX_ATTEMPTS) {
+      setAiFixGaveUp(true);
+      return;
+    }
+
+    // Dedupe: only kick off one fix per unique result.
+    const resultKey = `${result.executionTimeMs}-${result.exitCode}-${aiFixAttempt}`;
+    if (aiFixHandledForRef.current === resultKey) return;
+    aiFixHandledForRef.current = resultKey;
+
+    // Small delay so the UI can paint the failed result before JARVIS jumps in.
+    const t = setTimeout(() => { fixAndRerun(); }, 500);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, aiFixAutoMode, isAdmin, aiFixLoading, running]);
 
   async function applyAiFix() {
     if (!aiFixProposal) return;
@@ -695,6 +789,11 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       toast({ title: "Required field missing", description: err, variant: "destructive" });
       return;
     }
+    // Fresh user-initiated run — reset the auto-fix budget and timeline
+    setAiFixAttempt(0);
+    setAiFixHistory([]);
+    setAiFixGaveUp(false);
+    aiFixHandledForRef.current = null;
     executeNow();
   }
 
@@ -1344,64 +1443,148 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             {!result.stdout && !result.stderr && (
               <p className="text-xs italic text-muted-foreground">No output produced.</p>
             )}
-            {!result.success && isAdmin && !aiFixAutoMode && (
+            {isAdmin && (aiFixHistory.length > 0 || (!result.success && (aiFixAutoMode || aiFixLoading))) && (
               <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Wand2 className="h-4 w-4 text-purple-500 shrink-0" />
-                  <div>
-                    <div className="text-sm font-semibold">JARVIS Bug Fix</div>
-                    <p className="text-xs text-muted-foreground">
-                      JARVIS will analyze the error, patch the code, and re-run automatically — like Replit's AI fix.
+                {/* Header — always shows JARVIS Auto-Fix status + toggle */}
+                <div className="flex items-start gap-2">
+                  <Wand2 className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold">JARVIS Auto-Fix</span>
+                      <Badge
+                        variant={aiFixAutoMode ? "default" : "outline"}
+                        className="text-[10px]"
+                      >
+                        {aiFixAutoMode ? "ON" : "OFF"}
+                      </Badge>
+                      {aiFixAttempt > 0 && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          Attempt {aiFixAttempt}/{MAX_AUTO_FIX_ATTEMPTS}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      JARVIS reads errors, patches the code, and re-runs automatically — up to {MAX_AUTO_FIX_ATTEMPTS} attempts.
                     </p>
                   </div>
+                  {!aiFixLoading && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={() => setAiFixAutoMode((v) => !v)}
+                    >
+                      {aiFixAutoMode ? "Turn off" : "Turn on"}
+                    </Button>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={fixAndRerun} disabled={aiFixLoading}>
-                    {aiFixLoading
-                      ? <><Loader2 className="mr-2 h-3 w-3 animate-spin" />Analyzing…</>
-                      : <><Wand2 className="mr-2 h-3 w-3" />Fix &amp; Re-run</>}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={requestAiFix} disabled={aiFixLoading}>
-                    Review fix first
-                  </Button>
-                </div>
+
+                {/* Live status while JARVIS is working */}
+                {aiFixLoading && (
+                  <div className="flex items-center gap-2 text-sm text-purple-600 dark:text-purple-400 border-t border-purple-500/20 pt-2">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    <span>
+                      JARVIS is analyzing the error and patching the code… (attempt {aiFixAttempt} of {MAX_AUTO_FIX_ATTEMPTS})
+                    </span>
+                  </div>
+                )}
+
+                {/* Attempt timeline — every fix JARVIS tried, with diagnosis and outcome */}
+                {aiFixHistory.length > 0 && (
+                  <div className="space-y-2 border-t border-purple-500/20 pt-2">
+                    <div className="text-[11px] uppercase tracking-wide font-semibold text-purple-600/80 dark:text-purple-400/80">
+                      Auto-Fix Timeline
+                    </div>
+                    {aiFixHistory.map((h) => {
+                      const outcomeBadge =
+                        h.outcome === "fixed" ? { label: "Fixed", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" } :
+                        h.outcome === "still_failing" ? { label: "Still failing", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30" } :
+                        h.outcome === "error" ? { label: "JARVIS error", cls: "bg-destructive/15 text-destructive border-destructive/30" } :
+                        { label: "Re-running…", cls: "bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30" };
+                      return (
+                        <div key={h.attempt} className="rounded border border-purple-500/20 bg-background/40 p-2 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-[10px]">Attempt {h.attempt}</Badge>
+                            <Badge variant="outline" className={`text-[10px] ${outcomeBadge.cls}`}>{outcomeBadge.label}</Badge>
+                            {h.outcome !== "error" && (
+                              <Badge
+                                variant={h.confidence === "high" ? "default" : h.confidence === "medium" ? "secondary" : "outline"}
+                                className="text-[10px]"
+                              >
+                                {h.confidence} confidence
+                              </Badge>
+                            )}
+                            {h.provider && <Badge variant="outline" className="text-[10px]">{h.provider}</Badge>}
+                          </div>
+                          {h.outcome === "error" ? (
+                            <p className="text-xs text-destructive">{h.error || "JARVIS could not produce a fix."}</p>
+                          ) : (
+                            <>
+                              <p className="text-xs text-foreground/80">{h.diagnosis}</p>
+                              {h.changes.length > 0 && (
+                                <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                                  {h.changes.slice(0, 4).map((c, i) => <li key={i}>{c}</li>)}
+                                  {h.changes.length > 4 && (
+                                    <li className="list-none text-muted-foreground/60">+{h.changes.length - 4} more changes</li>
+                                  )}
+                                </ul>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Final state — JARVIS gave up after exhausting attempts */}
+                {!aiFixLoading && !result.success && (aiFixGaveUp || aiFixAttempt >= MAX_AUTO_FIX_ATTEMPTS) && (
+                  <div className="flex items-start gap-2 border-t border-purple-500/20 pt-2">
+                    <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 text-xs text-foreground/80">
+                      JARVIS could not fully resolve the error after {aiFixAttempt} attempt{aiFixAttempt === 1 ? "" : "s"}.
+                      You can review the timeline above, manually open the latest fix, or try again.
+                      <div className="flex items-center gap-2 mt-2">
+                        <Button size="sm" variant="outline" onClick={requestAiFix} disabled={aiFixLoading}>
+                          <Wand2 className="h-3 w-3 mr-1.5" />Open last fix
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setAiFixAttempt(0);
+                            setAiFixHistory([]);
+                            setAiFixGaveUp(false);
+                            aiFixHandledForRef.current = null;
+                            executeNow();
+                          }}
+                          disabled={running || aiFixLoading}
+                        >
+                          <Play className="h-3 w-3 mr-1.5" />Run again
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Auto-mode is OFF and we have a failed result — give the user manual controls */}
+                {!aiFixLoading && !result.success && !aiFixAutoMode && aiFixHistory.length === 0 && (
+                  <div className="flex items-center gap-2 border-t border-purple-500/20 pt-2">
+                    <Button size="sm" onClick={fixAndRerun} disabled={aiFixLoading}>
+                      <Wand2 className="mr-2 h-3 w-3" />Fix &amp; Re-run once
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={requestAiFix} disabled={aiFixLoading}>
+                      Review fix first
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
-            {!result.success && isAdmin && aiFixAutoMode && (
-              <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-2">
-                {aiFixLoading && (
-                  <div className="flex items-center gap-2 text-sm text-purple-600 dark:text-purple-400">
-                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                    <span>JARVIS is reading the error and fixing the code…</span>
-                  </div>
-                )}
-                {!aiFixLoading && aiFixApplied && aiFixProposal && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-purple-600 dark:text-purple-400">
-                      <Wand2 className="h-4 w-4 shrink-0" />
-                      JARVIS fixed the code — re-running now…
-                    </div>
-                    <p className="text-xs text-foreground/80">{aiFixProposal.diagnosis}</p>
-                    {aiFixProposal.changes.length > 0 && (
-                      <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
-                        {aiFixProposal.changes.slice(0, 5).map((c, i) => <li key={i}>{c}</li>)}
-                        {aiFixProposal.changes.length > 5 && (
-                          <li className="list-none text-muted-foreground/60">+{aiFixProposal.changes.length - 5} more changes</li>
-                        )}
-                      </ul>
-                    )}
-                    <div className="flex items-center gap-2 pt-1">
-                      <Badge
-                        variant={aiFixProposal.confidence === "high" ? "default" : aiFixProposal.confidence === "medium" ? "secondary" : "outline"}
-                        className="text-[10px]"
-                      >
-                        {aiFixProposal.confidence} confidence
-                      </Badge>
-                      {aiFixProvider && <Badge variant="outline" className="text-[10px]">{aiFixProvider}</Badge>}
-                    </div>
-                  </div>
-                )}
+            {/* Non-admins still get a hint that admins can auto-fix */}
+            {!result.success && !isAdmin && (
+              <div className="border border-muted/40 bg-muted/20 rounded-md p-3 text-xs text-muted-foreground flex items-start gap-2">
+                <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>The script failed. JARVIS Auto-Fix can repair the code, but it requires an admin. Please contact a script admin.</span>
               </div>
             )}
           </div>
