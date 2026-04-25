@@ -77,8 +77,28 @@ The AI Enhancer and AI Fix Error features use Anthropic Claude.
 
 The code in `artifacts/api-server/src/lib/aiClient.ts` and `lib/integrations-anthropic-ai/src/client.ts` handles both cases — it prefers a key stored in Admin Settings, falls back to the env var.
 
+## JARVIS AI Enhancer
+
+The AI Enhancer (`POST /api/scripts/:id/ai-enhance`) is a JARVIS-style AI analyst and code improver:
+
+**Field Reconciliation** — AI reads the full script and produces `reconciledFields` (the definitive correct form field list):
+- Parser-detected fields that ARE needed → kept (`source: "parser"`)
+- Fields the parser MISSED but the script needs → added (`source: "ai_added"`, shown with green "Added by JARVIS" badge)
+- Parser-detected fields that are NOT needed → silently removed
+- The run dialog prefers `aiSchema.reconciledFields` over raw parser output when available
+
+**Code Enhancement** — AI improves the script and saves it back to `scripts.code`:
+- Adds progress print statements, try/except around network calls, input validation, specific error messages
+- `aiSchema.codeEnhanced = true` + `aiSchema.codeChanges[]` describe what was improved
+- The run dialog shows a green "Script enhanced by JARVIS" banner listing the changes
+
+**tkinter simpledialog detection** — parser now also detects:
+- `simpledialog.askstring("Title", "Prompt:")` → text field with label = "Prompt"
+- `simpledialog.askstring("Title", "Password:", show="*")` → password field
+- `simpledialog.askinteger(...)` / `simpledialog.askfloat(...)` → number field
+
 ## Notes
 
 - `lib/api-zod/src/index.ts` only exports from generated tag subdirs (not the old types folder pattern) — do not add `export * from "./generated/types"` back
 - Python execution uses `python3` system binary with 30s timeout, sandboxed temp directory
-- The tkinter form parser (`lib/scriptParser.ts`) detects Entry widgets using: (1) preceding Label text, (2) variable name (e.g. `username_entry` → "Username"), (3) following Label text as fallbacks in that order
+- The tkinter form parser (`lib/scriptParser.ts`) detects Entry widgets using: (1) preceding Label text, (2) variable name (e.g. `username_entry` → "Username"), (3) following Label text as fallbacks in that order; also detects `simpledialog` calls directly

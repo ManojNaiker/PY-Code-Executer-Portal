@@ -61,11 +61,19 @@ export default function ScriptsList() {
         throw new Error(err.error || `HTTP ${r.status}`);
       }
       const data = await r.json();
+      const ai = data.aiSchema ?? {};
+      const addedCount = (ai.reconciledFields ?? []).filter((f: any) => f.source === "ai_added").length;
+      const removedCount = Math.max(0,
+        (ai.fields?.length ?? 0) - (ai.reconciledFields?.length ?? 0)
+      );
+      const parts: string[] = [];
+      if (ai.scriptTitle) parts.push(ai.scriptTitle);
+      if (addedCount > 0) parts.push(`${addedCount} field(s) added`);
+      if (removedCount > 0) parts.push(`${removedCount} field(s) removed`);
+      if (data.codeEnhanced) parts.push("script code improved");
       toast({
-        title: "AI enhancement complete",
-        description: data.aiSchema?.scriptTitle
-          ? `Generated: ${data.aiSchema.scriptTitle}`
-          : "Form labels and descriptions updated.",
+        title: "JARVIS analysis complete",
+        description: parts.join(" · ") || "Form verified and updated.",
       });
     } catch (e: any) {
       toast({

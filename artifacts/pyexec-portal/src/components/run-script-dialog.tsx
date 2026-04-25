@@ -116,6 +116,16 @@ type AiHint = {
 };
 type AiActionHint = { label: string; friendlyLabel?: string; description?: string };
 type AiPathHint = { literal: string; friendlyLabel?: string; description?: string };
+type ReconciledField = {
+  label: string;
+  kind: "text" | "password" | "number" | "select" | "checkbox" | "textarea";
+  source: "parser" | "ai_added";
+  friendlyLabel?: string;
+  description?: string;
+  placeholder?: string;
+  example?: string;
+  validation?: string;
+};
 type AiSchema = {
   scriptTitle?: string;
   scriptSummary?: string;
@@ -124,6 +134,9 @@ type AiSchema = {
   actions?: AiActionHint[];
   paths?: AiPathHint[];
   warnings?: string[];
+  reconciledFields?: ReconciledField[];
+  codeChanges?: string[];
+  codeEnhanced?: boolean;
 } | null;
 
 interface Props {
@@ -198,14 +211,14 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     return aiSchema?.paths?.find((h) => h.literal === literal);
   }
 
-  function initTkValues(s: InputsSchema): Record<string, string> {
+  function initTkValues(s: InputsSchema, reconciledFields?: ReconciledField[]): Record<string, string> {
     const init: Record<string, string> = {};
-    if (s.tkForm) {
-      for (const f of s.tkForm.fields) {
-        if (f.default != null) init[f.label] = f.default;
-        else if (f.kind === "checkbox") init[f.label] = "false";
-        else init[f.label] = "";
-      }
+    const fields = reconciledFields ?? s.tkForm?.fields ?? [];
+    for (const f of fields) {
+      const def = (f as TkField).default;
+      if (def != null) init[f.label] = def;
+      else if (f.kind === "checkbox") init[f.label] = "false";
+      else init[f.label] = "";
     }
     return init;
   }
@@ -304,8 +317,25 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     }));
   }
 
+  // When AI schema loads with reconciledFields, re-initialize tkValues to include AI-added fields
+  useEffect(() => {
+    if (!schema || !aiSchema?.reconciledFields?.length) return;
+    setTkValues((current) => {
+      const merged = initTkValues(schema, aiSchema.reconciledFields);
+      // Preserve any values the user already typed
+      return { ...merged, ...current };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiSchema]);
+
+  // The authoritative field list: prefer AI-reconciled fields over raw parser output
+  const effectiveFields: (TkField | ReconciledField)[] =
+    (aiSchema?.reconciledFields && aiSchema.reconciledFields.length > 0)
+      ? aiSchema.reconciledFields
+      : (schema?.tkForm?.fields ?? []);
+
   const hasTkForm = !!schema?.tkForm && (
-    schema.tkForm.fields.length > 0 ||
+    effectiveFields.length > 0 ||
     schema.tkForm.actions.length > 0 ||
     schema.tkForm.needsFile
   );
@@ -631,9 +661,31 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
         </DialogHeader>
 
         {aiSchema && (
-          <div className="rounded-md border border-purple-500/30 bg-purple-500/5 p-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5 text-purple-500 shrink-0" />
-            <span>AI-enhanced labels, descriptions and safety hints are shown below.</span>
+          <div className="space-y-2">
+            <div className="rounded-md border border-purple-500/30 bg-purple-500/5 p-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+              <span>
+                JARVIS has verified this form.{" "}
+                {aiSchema.reconciledFields && aiSchema.reconciledFields.length > 0
+                  ? `${aiSchema.reconciledFields.filter((f) => f.source === "ai_added").length > 0
+                      ? `${aiSchema.reconciledFields.filter((f) => f.source === "ai_added").length} field(s) added, `
+                      : ""}${aiSchema.reconciledFields.filter((f) => f.source === "parser").length} field(s) verified.`
+                  : "Labels and safety hints are shown below."}
+              </span>
+            </div>
+            {aiSchema.codeEnhanced && aiSchema.codeChanges && aiSchema.codeChanges.length > 0 && (
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-1.5">
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  <Wand2 className="h-3.5 w-3.5 shrink-0" />
+                  Script enhanced by JARVIS — code has been improved
+                </div>
+                <ul className="text-xs text-foreground/70 space-y-0.5 pl-5 list-disc">
+                  {aiSchema.codeChanges.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
@@ -742,19 +794,33 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
 
         {!loadingSchema && schema?.tkForm && hasTkForm && (
           <div className="space-y-4 py-2">
-            {schema.tkForm.fields.length > 0 && (
+            {effectiveFields.length > 0 && (
               <div className="space-y-4">
-                <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">
+                <div className="text-sm font-semibold text-foreground/80 uppercase tracking-wide flex items-center gap-2">
                   Form Fields
+                  {aiSchema?.reconciledFields && (
+                    <Badge variant="outline" className="text-[10px] gap-1 normal-case font-normal border-purple-500/40 text-purple-600 dark:text-purple-400">
+                      <Sparkles className="h-2.5 w-2.5" /> JARVIS verified
+                    </Badge>
+                  )}
                 </div>
-                {schema.tkForm.fields.map((f) => {
-                  const hint = findFieldHint(f.label);
+                {effectiveFields.map((f) => {
+                  const isAiAdded = (f as ReconciledField).source === "ai_added";
+                  const hint = findFieldHint(f.label) ?? (isAiAdded ? (f as ReconciledField) : undefined);
+                  const choices = (f as TkField).choices;
+                  const dynamicFunc = (f as TkField).dynamicOptionsFunc;
+                  const defaultVal = (f as TkField).default;
                   return (
-                  <div key={f.label} className="space-y-1.5">
-                    <Label htmlFor={`tk-${f.label}`} className="flex items-center gap-2">
+                  <div key={f.label} className={`space-y-1.5 ${isAiAdded ? "p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5" : ""}`}>
+                    <Label htmlFor={`tk-${f.label}`} className="flex items-center gap-2 flex-wrap">
                       {hint?.friendlyLabel ?? f.label}
                       <Badge variant="outline" className="text-[10px]">{f.kind}</Badge>
-                      {hint && <Sparkles className="h-3 w-3 text-purple-500" />}
+                      {isAiAdded && (
+                        <Badge className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
+                          <Wand2 className="h-2.5 w-2.5" /> Added by JARVIS
+                        </Badge>
+                      )}
+                      {!isAiAdded && hint && <Sparkles className="h-3 w-3 text-purple-500" />}
                     </Label>
                     {hint?.description && (
                       <p className="text-xs text-muted-foreground">{hint.description}</p>
@@ -765,7 +831,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                         <span className="font-mono">{hint.example}</span>
                       </p>
                     )}
-                    {f.kind === "select" && (f.choices && f.choices.length > 0) ? (
+                    {f.kind === "select" && (choices && choices.length > 0) ? (
                       <select
                         id={`tk-${f.label}`}
                         className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
@@ -773,7 +839,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                         onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
                       >
                         <option value="">-- Select --</option>
-                        {f.choices.map((c) => (
+                        {choices.map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
@@ -782,7 +848,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                         <Loader2 className="h-3 w-3 animate-spin" />
                         Loading options from script…
                       </div>
-                    ) : f.kind === "select" && f.dynamicOptionsFunc ? (
+                    ) : f.kind === "select" && dynamicFunc ? (
                       <div className="space-y-1">
                         <Input
                           id={`tk-${f.label}`}
@@ -825,7 +891,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                         id={`tk-${f.label}`}
                         type={f.kind === "password" ? "password" : f.kind === "number" ? "number" : "text"}
                         value={tkValues[f.label] ?? ""}
-                        placeholder={f.default ?? `Enter ${f.label.toLowerCase()}`}
+                        placeholder={defaultVal ?? hint?.placeholder ?? `Enter ${f.label.toLowerCase()}`}
                         onChange={(e) => setTkValues((v) => ({ ...v, [f.label]: e.target.value }))}
                       />
                     )}
