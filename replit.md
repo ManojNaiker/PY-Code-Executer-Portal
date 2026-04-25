@@ -65,7 +65,20 @@ Tables:
 
 UI: admin-users page has "New User" + "Bulk Import" dialogs and per-row delete; admin-departments page has "Bulk Import" dialog; script-detail page shows "Edit" button for admins.
 
+## AI / Anthropic API Key Setup
+
+The AI Enhancer and AI Fix Error features use Anthropic Claude.
+
+**On Replit (current setup):** The Replit Anthropic AI integration is installed and provides the API key automatically via the `AI_INTEGRATIONS_ANTHROPIC_API_KEY` environment variable. No manual configuration needed.
+
+**Running locally (development on your machine):** The Replit integration env var won't be available. You have two options:
+1. Set `SESSION_SECRET` and add your own Anthropic key via Admin Settings in the app (Settings → AI Provider → Anthropic → paste key).
+2. Or set the env var manually: `export AI_INTEGRATIONS_ANTHROPIC_API_KEY=sk-ant-...` before starting the backend.
+
+The code in `artifacts/api-server/src/lib/aiClient.ts` and `lib/integrations-anthropic-ai/src/client.ts` handles both cases — it prefers a key stored in Admin Settings, falls back to the env var.
+
 ## Notes
 
 - `lib/api-zod/src/index.ts` only exports from generated tag subdirs (not the old types folder pattern) — do not add `export * from "./generated/types"` back
 - Python execution uses `python3` system binary with 30s timeout, sandboxed temp directory
+- The tkinter form parser (`lib/scriptParser.ts`) detects Entry widgets using: (1) preceding Label text, (2) variable name (e.g. `username_entry` → "Username"), (3) following Label text as fallbacks in that order

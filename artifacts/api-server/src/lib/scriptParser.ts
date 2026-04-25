@@ -701,11 +701,64 @@ export function parseTkinterForm(code: string): TkForm {
     const showVal = kw.show ? stripQuotes(kw.show) : "";
     const isPassword = showVal === "*" || showVal === "•" || showVal === "●";
     const placeholder = kw.placeholder_text ? stripQuotes(kw.placeholder_text) : "";
+
+    // Primary: look for a Label widget immediately before this Entry in source order
+    const labelBefore = lastLabelTextBefore(code, call.index);
+
+    // Fallback: derive a human-readable label from the variable name, e.g.
+    //   self.username_entry = Entry(...)  →  "Username"
+    //   user_name_e = Entry(...)          →  "User Name"
+    const varName = assignedVarNameBefore(code, call.index);
+    const labelFromVar = (() => {
+      if (!varName) return "";
+      const stripped = varName
+        .replace(/^(self_?|self\.)?/i, "")
+        .replace(/_?(entry|field|var|input|text|box|e|ent)$/i, "")
+        .replace(/^(e|ent)_/i, "")
+        .trim();
+      return stripped ? humanizeName(stripped) : "";
+    })();
+
+    // Secondary fallback: look for a Label that appears close AFTER the Entry
+    // (some scripts define all widgets first then call .grid()/.pack())
+    const labelAfter = (() => {
+      const windowEnd = Math.min(call.index + 600, code.length);
+      const snippet = code.slice(call.index, windowEnd);
+      const re = /(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:Label|CTkLabel)\s*\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(snippet))) {
+        const bodyStart = m.index + m[0].length;
+        let depth = 1;
+        let inStr: string | null = null;
+        let body = "";
+        let i = bodyStart;
+        while (i < snippet.length && depth > 0) {
+          const c = snippet[i];
+          const prev = i > 0 ? snippet[i - 1] : "";
+          if (inStr) { if (c === inStr && prev !== "\\") inStr = null; body += c; }
+          else if (c === '"' || c === "'") { inStr = c; body += c; }
+          else if (c === "(") { depth++; body += c; }
+          else if (c === ")") { depth--; if (depth === 0) break; body += c; }
+          else body += c;
+          i++;
+        }
+        const kw2 = extractKwargs(body);
+        if (kw2.text) {
+          const t = stripQuotes(kw2.text).replace(/[:：]\s*$/, "").trim();
+          if (t) return t;
+        }
+      }
+      return "";
+    })();
+
     const label =
-      lastLabelTextBefore(code, call.index) ||
+      labelBefore ||
+      labelFromVar ||
+      labelAfter ||
       placeholder ||
       (kw.name ? stripQuotes(kw.name) : "") ||
       "Input";
+
     fields.push({
       label,
       kind: isPassword ? "password" : "text",

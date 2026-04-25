@@ -42,7 +42,10 @@ export type AiEnhancedSchema = {
   generatedAt: string;
 };
 
-const SYSTEM_PROMPT = `You are an expert Python and UX engineer. You analyze Python scripts that have been converted into web forms by an automatic parser, and you produce a much richer, user-friendly schema describing each input.
+const SYSTEM_PROMPT = `You are an expert Python and UX engineer. You analyze Python scripts that have been converted into web forms by an automatic parser. Your job is to:
+1. Produce a richer, user-friendly schema with better labels/descriptions for each detected input.
+2. Thoroughly READ the Python source and catch any inputs the automatic parser missed (e.g. input() prompts, tkinter Entry widgets, hardcoded paths).
+3. Warn about code issues, runtime pitfalls, and destructive operations.
 
 You MUST respond with ONLY a valid JSON object matching this TypeScript shape (no prose, no markdown fences):
 {
@@ -75,7 +78,7 @@ You MUST respond with ONLY a valid JSON object matching this TypeScript shape (n
       "description": string        // what this file is used for, 1 sentence
     }
   ],
-  "warnings": string[]             // important things end users should know (security, side effects, network calls, deletes, etc.) — at most 3 short bullets
+  "warnings": string[]             // IMPORTANT: use warnings for: (1) inputs the parser missed that the script requires, (2) destructive operations, (3) network calls, (4) env vars or credentials required, (5) any code logic errors you spotted — at most 5 short bullets
 }
 
 Rules:
@@ -83,7 +86,9 @@ Rules:
 - Never invent fields/actions that are not in the input schema.
 - Keep all friendlyLabel/description text under 120 chars.
 - Use plain English, end-user friendly tone (assume non-technical users).
-- Mention destructive operations (rm, delete, drop, shutdown, reboot) in warnings.`;
+- READ the Python source carefully. If you see the script calls input("Username:") or reads sys.argv or uses a tkinter Entry that was NOT captured in the parsed schema, add a warning like: "⚠ Script requires a 'Username' input that is not shown in the form — the run may fail without it."
+- Mention destructive operations (rm, delete, drop, shutdown, reboot) in warnings.
+- If you detect a likely runtime error (e.g. script calls input() but no stdin field was detected, or it expects a file that has no upload field), flag it clearly in warnings.`;
 
 router.post("/scripts/:id/ai-enhance", requireAuth, async (req, res) => {
   const userId = (req as any).userId as string;
@@ -116,8 +121,10 @@ router.post("/scripts/:id/ai-enhance", requireAuth, async (req, res) => {
     const userPrompt = `Script name: ${script.name}
 Existing description: ${script.description ?? "(none)"}
 
-Parsed input schema (the auto-generated form):
+AUTO-DETECTED FORM SCHEMA (what the parser found — may be incomplete):
 ${JSON.stringify(summary, null, 2)}
+
+IMPORTANT: Read the Python source below carefully. The parser may have missed some input() calls, tkinter Entry widgets, or required fields. If the script requires something the schema above does not cover, add a warning.
 
 Python source code:
 \`\`\`python
