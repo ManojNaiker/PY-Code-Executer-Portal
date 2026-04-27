@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import brandLogo from "@assets/light-logo_1777279651578.png";
 
 export function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -76,11 +77,11 @@ export function Layout({ children }: { children: ReactNode }) {
     <SidebarProvider>
       <div className="flex min-h-screen w-full bg-background">
         <Sidebar className="border-r">
-          <SidebarHeader className="flex h-16 items-center px-4 font-bold text-lg text-white tracking-tight border-b border-sidebar-border">
-            <div className="flex items-center justify-center h-8 w-8 rounded-md bg-sidebar-primary text-sidebar-primary-foreground mr-2.5">
-              <Code2 className="h-4 w-4" />
+          <SidebarHeader className="flex h-16 items-center px-3 border-b border-sidebar-border">
+            <div className="flex items-center gap-2 bg-white rounded-md px-2 py-1.5 w-full">
+              <img src={brandLogo} alt="Light — Finance. Simple." className="h-7 w-auto" />
+              <span className="ml-auto text-[10px] uppercase tracking-wider text-gray-500 font-semibold">PyExec</span>
             </div>
-            PyExec Portal
           </SidebarHeader>
           <SidebarContent>
             <SidebarGroup>
@@ -145,7 +146,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <main className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-14 items-center gap-4 border-b bg-background px-6 md:hidden">
             <SidebarMobileTrigger />
-            <span className="font-bold">PyExec Portal</span>
+            <img src={brandLogo} alt="Light — Finance. Simple." className="h-7 w-auto" />
           </header>
           <div className="flex-1 overflow-y-auto px-6 md:px-10 pb-10">
             <div className="w-full">

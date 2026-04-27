@@ -1,3 +1,5 @@
+import { BRAND_LOGO_ABS_PATH, brandLogoExists, looksLikeLogoOrIconField } from "./brandAssets";
+
 export type DetectedArg = {
   name: string;
   flag: string | null;
@@ -341,6 +343,20 @@ export function parseScriptInputs(code: string): ScriptInputsSchema {
         tkForm.fields = tkForm.fields.filter(
           (f) => (f.label || "").trim().toLowerCase() !== fileLabelLower,
         );
+      }
+    }
+
+    // Auto-default any "logo path" / "icon path" field to the platform's
+    // bundled brand logo so users never have to hunt for an image file.
+    if (brandLogoExists()) {
+      for (const f of tkForm.fields) {
+        if (
+          looksLikeLogoOrIconField(f.label) &&
+          (f.kind === "text" || f.kind === "textarea") &&
+          (!f.default || !f.default.trim())
+        ) {
+          f.default = BRAND_LOGO_ABS_PATH;
+        }
       }
     }
   }

@@ -18,6 +18,7 @@ import NotFound from "./pages/not-found";
 import { Layout } from "./components/layout";
 import { queryClient } from "./lib/queryClient";
 import { AuthProvider, useAuth } from "./hooks/use-auth";
+import brandLogo from "@assets/light-logo_1777279651578.png";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -33,16 +34,11 @@ function AuthPageLayout({ children, title, subtitle }: { children: ReactNode; ti
         <div className="absolute -top-32 -left-32 w-[28rem] h-[28rem] rounded-full blur-3xl" style={{ background: "radial-gradient(circle, rgba(96,165,250,0.35), transparent 60%)" }} />
         <div className="absolute -bottom-40 -right-32 w-[32rem] h-[32rem] rounded-full blur-3xl" style={{ background: "radial-gradient(circle, rgba(56,189,248,0.25), transparent 60%)" }} />
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-12">
-            <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-lg">
-              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white">
-                <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 2h2v2h2v-2h2v2h-2v2h2v2h-2v-2h-2v2h-2v-2h2v-2h-2v-2z"/>
-              </svg>
+          <div className="flex flex-col gap-3 mb-12">
+            <div className="bg-white rounded-xl px-5 py-4 shadow-lg inline-flex items-center justify-center w-fit">
+              <img src={brandLogo} alt="Light — Finance. Simple." className="h-12 w-auto" />
             </div>
-            <div>
-              <div className="text-white font-semibold text-lg leading-tight">PyExec Portal</div>
-              <div className="text-white/80 text-xs">Enterprise Platform</div>
-            </div>
+            <div className="text-white/80 text-xs tracking-wide uppercase">Enterprise Platform</div>
           </div>
           <h1 className="text-white text-3xl font-semibold leading-tight mb-4 drop-shadow">
             Secure Python<br />Execution Platform
@@ -59,6 +55,9 @@ function AuthPageLayout({ children, title, subtitle }: { children: ReactNode; ti
 
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 bg-white">
         <div className="w-full max-w-[380px]">
+          <div className="lg:hidden mb-8 flex justify-center">
+            <img src={brandLogo} alt="Light — Finance. Simple." className="h-12 w-auto" />
+          </div>
           <div className="mb-8">
             <h2 className="text-2xl font-semibold text-[#0f1e3c] mb-1">{title}</h2>
             <p className="text-sm text-gray-500">{subtitle}</p>
