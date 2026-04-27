@@ -15,7 +15,7 @@ import { FileUp, Upload as UploadIcon, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const SUPPORTED_EXTENSIONS = [
-  ".py", ".pyw",
+  ".py", ".pyw", ".ipynb",
   ".sh", ".bash", ".zsh",
   ".js", ".mjs", ".cjs",
   ".ts",
@@ -38,6 +38,55 @@ function stripExtension(name: string): string {
   const lower = name.toLowerCase();
   const ext = SUPPORTED_EXTENSIONS.find(e => lower.endsWith(e));
   return ext ? name.slice(0, name.length - ext.length) : name;
+}
+
+/**
+ * Convert a Jupyter notebook (.ipynb JSON) into a runnable Python script.
+ * - Code cells become Python blocks separated by `# %% [cell N]` markers
+ *   (compatible with VS Code / PyCharm cell-mode).
+ * - Markdown cells become `# %% [markdown]` comments.
+ * - Magic lines (%matplotlib, !pip install ...) and shell-prefixed lines
+ *   are commented out so the file is valid Python.
+ * Returns null if the file isn't a valid notebook.
+ */
+function notebookToPython(rawJson: string): string | null {
+  let nb: any;
+  try {
+    nb = JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
+  if (!nb || !Array.isArray(nb.cells)) return null;
+
+  const out: string[] = [
+    "# Converted from Jupyter Notebook (.ipynb) on upload.",
+    "# Magic commands (%xxx) and shell lines (!xxx) have been commented out.",
+    "",
+  ];
+  let cellIdx = 0;
+  for (const cell of nb.cells) {
+    cellIdx += 1;
+    const src = Array.isArray(cell.source) ? cell.source.join("") : (typeof cell.source === "string" ? cell.source : "");
+    if (cell.cell_type === "code") {
+      out.push(`# %% [cell ${cellIdx}]`);
+      const lines = src.split("\n").map((line: string) => {
+        const trimmed = line.trimStart();
+        // Comment out IPython magics and shell escapes — they're not valid Python.
+        if (trimmed.startsWith("%") || trimmed.startsWith("!") || trimmed.startsWith("?")) {
+          return `# [magic] ${line}`;
+        }
+        return line;
+      });
+      out.push(lines.join("\n"));
+      out.push("");
+    } else if (cell.cell_type === "markdown") {
+      out.push(`# %% [markdown ${cellIdx}]`);
+      const lines = src.split("\n").map((line: string) => `# ${line}`);
+      out.push(lines.join("\n"));
+      out.push("");
+    }
+  }
+  return out.join("\n");
 }
 
 const formSchema = z.object({
@@ -98,7 +147,9 @@ export default function Upload() {
       return;
     }
 
-    setFilename(file.name);
+    const isNotebook = file.name.toLowerCase().endsWith(".ipynb");
+    const finalName = isNotebook ? `${stripExtension(file.name)}.py` : file.name;
+    setFilename(finalName);
 
     // Set default name if empty
     if (!form.getValues("name")) {
@@ -108,7 +159,21 @@ export default function Upload() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result;
-      if (typeof result === "string") {
+      if (typeof result !== "string") return;
+      if (isNotebook) {
+        const py = notebookToPython(result);
+        if (!py) {
+          setFileError("Could not parse the .ipynb file. Make sure it's a valid Jupyter notebook.");
+          setFileContent("");
+          setFilename("");
+          return;
+        }
+        setFileContent(py);
+        toast({
+          title: "Notebook converted",
+          description: "The .ipynb was flattened into a Python script so it can run on the server and be fixed by JARVIS.",
+        });
+      } else {
         setFileContent(result);
       }
     };
@@ -168,7 +233,7 @@ export default function Upload() {
                       <>
                         <span className="text-sm text-muted-foreground">Click or drag a script file to upload</span>
                         <span className="text-xs text-muted-foreground">
-                          Python, Bash, JavaScript, TypeScript, PowerShell, Batch, VBScript, VBA, HTML, SQL, Ruby, Perl, PHP
+                          Python, Jupyter Notebook, Bash, JavaScript, TypeScript, PowerShell, Batch, VBScript, VBA, HTML, SQL, Ruby, Perl, PHP
                         </span>
                       </>
                     )}
