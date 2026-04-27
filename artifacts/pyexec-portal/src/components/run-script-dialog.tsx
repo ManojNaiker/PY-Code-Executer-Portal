@@ -117,6 +117,28 @@ type ExecResult = {
   };
 };
 
+// Detects "soft" errors — script exited with code 0 but the output clearly
+// indicates a logical failure (validation error, caught exception, etc.).
+// Many GUI scripts catch their own errors and exit cleanly, which would
+// otherwise hide the failure from JARVIS Auto-Fix.
+function hasSoftError(r: ExecResult | null): boolean {
+  if (!r) return false;
+  const text = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+  if (!text.trim()) return false;
+  const PATTERNS: RegExp[] = [
+    /\[ERROR\]/,
+    /\[FATAL\]/,
+    /\[CRITICAL\]/,
+    /^Traceback \(most recent call last\):/m,
+    /Validation Error/i,
+    /^Error:/m,
+    /^Exception:/m,
+    /^[A-Z][A-Za-z]*Error:/m, // SyntaxError:, ValueError:, IndentationError: at line start
+    /Unhandled exception/i,
+  ];
+  return PATTERNS.some((re) => re.test(text));
+}
+
 type DepStatus = { module: string; package: string; installed: boolean };
 
 type AiHint = {
@@ -735,24 +757,27 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     if (!aiFixAutoMode) return;
     if (aiFixLoading || running) return;
 
+    const softErr = hasSoftError(result);
+    const effectivelyFailed = !result.success || softErr;
+
     // Update the latest history entry with the outcome of the just-finished run.
     setAiFixHistory((prev) => {
       if (prev.length === 0) return prev;
       const last = prev[prev.length - 1];
       if (last.outcome !== "applied") return prev;
       return prev.map((h, i) => i === prev.length - 1
-        ? { ...h, outcome: result.success ? "fixed" : "still_failing" }
+        ? { ...h, outcome: effectivelyFailed ? "still_failing" : "fixed" }
         : h);
     });
 
-    if (result.success) return;
+    if (!effectivelyFailed) return;
     if (aiFixAttempt >= MAX_AUTO_FIX_ATTEMPTS) {
       setAiFixGaveUp(true);
       return;
     }
 
     // Dedupe: only kick off one fix per unique result.
-    const resultKey = `${result.executionTimeMs}-${result.exitCode}-${aiFixAttempt}`;
+    const resultKey = `${result.executionTimeMs}-${result.exitCode}-${softErr ? "soft" : "hard"}-${aiFixAttempt}`;
     if (aiFixHandledForRef.current === resultKey) return;
     aiFixHandledForRef.current = resultKey;
 
@@ -1403,22 +1428,39 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
           </div>
         )}
 
-        {result && (
-          <div className={`rounded-md border p-3 space-y-2 ${result.success ? "border-emerald-500/40 bg-emerald-500/5" : "border-destructive/40 bg-destructive/5"}`}>
+        {result && (() => {
+          const softErr = hasSoftError(result);
+          const isHardFail = !result.success;
+          const isSoftFail = !isHardFail && softErr;
+          const effectivelyFailed = isHardFail || isSoftFail;
+          const containerClass = isHardFail
+            ? "border-destructive/40 bg-destructive/5"
+            : isSoftFail
+              ? "border-amber-500/40 bg-amber-500/5"
+              : "border-emerald-500/40 bg-emerald-500/5";
+          const statusLabel = isHardFail
+            ? "Failed"
+            : isSoftFail
+              ? "Completed with errors"
+              : "Success";
+          return (
+          <div className={`rounded-md border p-3 space-y-2 ${containerClass}`}>
             <div className="flex items-center gap-2">
-              {result.success ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              ) : (
+              {isHardFail ? (
                 <AlertCircle className="h-4 w-4 text-destructive" />
+              ) : isSoftFail ? (
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
               )}
               <span className="text-sm font-semibold">
-                {result.success ? "Success" : "Failed"}
+                {statusLabel}
               </span>
               <Badge variant="outline" className="ml-auto">
                 <Clock className="h-3 w-3 mr-1" />
                 {result.executionTimeMs}ms
               </Badge>
-              <Badge variant={result.success ? "default" : "destructive"}>
+              <Badge variant={isHardFail ? "destructive" : isSoftFail ? "outline" : "default"} className={isSoftFail ? "border-amber-500/50 text-amber-600 dark:text-amber-400" : undefined}>
                 exit {result.exitCode}
               </Badge>
             </div>
@@ -1443,7 +1485,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             {!result.stdout && !result.stderr && (
               <p className="text-xs italic text-muted-foreground">No output produced.</p>
             )}
-            {(aiFixHistory.length > 0 || (!result.success && (aiFixAutoMode || aiFixLoading))) && (
+            {(aiFixHistory.length > 0 || (effectivelyFailed && (aiFixAutoMode || aiFixLoading))) && (
               <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-3">
                 {/* Header — always shows JARVIS Auto-Fix status + toggle */}
                 <div className="flex items-start gap-2">
@@ -1538,7 +1580,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 )}
 
                 {/* Final state — JARVIS gave up after exhausting attempts */}
-                {!aiFixLoading && !result.success && (aiFixGaveUp || aiFixAttempt >= MAX_AUTO_FIX_ATTEMPTS) && (
+                {!aiFixLoading && effectivelyFailed && (aiFixGaveUp || aiFixAttempt >= MAX_AUTO_FIX_ATTEMPTS) && (
                   <div className="flex items-start gap-2 border-t border-purple-500/20 pt-2">
                     <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                     <div className="flex-1 text-xs text-foreground/80">
@@ -1567,7 +1609,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 )}
 
                 {/* Auto-mode is OFF and we have a failed result — give the user manual controls */}
-                {!aiFixLoading && !result.success && !aiFixAutoMode && aiFixHistory.length === 0 && (
+                {!aiFixLoading && effectivelyFailed && !aiFixAutoMode && aiFixHistory.length === 0 && (
                   <div className="flex items-center gap-2 border-t border-purple-500/20 pt-2">
                     <Button size="sm" onClick={fixAndRerun} disabled={aiFixLoading}>
                       <Wand2 className="mr-2 h-3 w-3" />Fix &amp; Re-run once
@@ -1581,7 +1623,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             )}
 
           </div>
-        )}
+          );
+        })()}
 
         <Dialog open={aiFixOpen} onOpenChange={(o) => { if (!aiFixApplying) setAiFixOpen(o); }}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
