@@ -14,6 +14,32 @@ import { useToast } from "@/hooks/use-toast";
 import { FileUp, Upload as UploadIcon, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
+const SUPPORTED_EXTENSIONS = [
+  ".py", ".pyw",
+  ".sh", ".bash", ".zsh",
+  ".js", ".mjs", ".cjs",
+  ".ts",
+  ".ps1", ".psm1",
+  ".bat", ".cmd",
+  ".vbs", ".vba", ".bas", ".cls", ".frm",
+  ".html", ".htm",
+  ".sql",
+  ".rb", ".pl", ".php",
+];
+
+const SUPPORTED_EXTENSIONS_ACCEPT = SUPPORTED_EXTENSIONS.join(",");
+
+function hasSupportedExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SUPPORTED_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
+
+function stripExtension(name: string): string {
+  const lower = name.toLowerCase();
+  const ext = SUPPORTED_EXTENSIONS.find(e => lower.endsWith(e));
+  return ext ? name.slice(0, name.length - ext.length) : name;
+}
+
 const formSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(100),
   description: z.string().max(500).optional(),
@@ -64,8 +90,8 @@ export default function Upload() {
       return;
     }
 
-    if (!file.name.endsWith('.py')) {
-      setFileError("Only .py files are supported");
+    if (!hasSupportedExtension(file.name)) {
+      setFileError("Unsupported file type. Upload a script JARVIS knows (.py, .sh, .js, .ts, .ps1, .bat, .vbs, .bas, .html, .sql, .rb, .pl, .php …).");
       setFileContent("");
       setFilename("");
       e.target.value = "";
@@ -73,10 +99,10 @@ export default function Upload() {
     }
 
     setFilename(file.name);
-    
+
     // Set default name if empty
     if (!form.getValues("name")) {
-      form.setValue("name", file.name.replace(/\.py$/, ''));
+      form.setValue("name", stripExtension(file.name));
     }
 
     const reader = new FileReader();
@@ -94,7 +120,7 @@ export default function Upload() {
 
   const onSubmit = (values: z.infer<typeof formSchema>) => {
     if (!fileContent || !filename) {
-      setFileError("Please select a valid Python file");
+      setFileError("Please select a script file to upload.");
       return;
     }
 
@@ -114,7 +140,7 @@ export default function Upload() {
     <div>
       <PageHeader
         title="Upload Script"
-        description="Deploy a new Python script to the portal."
+        description="Deploy a new script to the portal. JARVIS auto-fixes any supported language."
         icon={<UploadIcon className="h-5 w-5" />}
       />
       <div className="max-w-3xl">
@@ -126,11 +152,11 @@ export default function Upload() {
               <div className="space-y-6">
               
               <div className="space-y-2">
-                <label className={`text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 ${fileError ? "text-destructive" : ""}`}>Python File *</label>
+                <label className={`text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 ${fileError ? "text-destructive" : ""}`}>Script File *</label>
                 <div className={`border-2 border-dashed rounded-lg p-6 text-center ${fileError ? 'border-destructive bg-destructive/5' : 'border-muted-foreground/25 hover:bg-muted/50'} transition-colors relative`}>
                   <input
                     type="file"
-                    accept=".py"
+                    accept={SUPPORTED_EXTENSIONS_ACCEPT}
                     onChange={handleFileChange}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   />
@@ -139,7 +165,12 @@ export default function Upload() {
                     {filename ? (
                       <span className="font-medium font-mono text-primary">{filename}</span>
                     ) : (
-                      <span className="text-sm text-muted-foreground">Click or drag a .py file to upload</span>
+                      <>
+                        <span className="text-sm text-muted-foreground">Click or drag a script file to upload</span>
+                        <span className="text-xs text-muted-foreground">
+                          Python, Bash, JavaScript, TypeScript, PowerShell, Batch, VBScript, VBA, HTML, SQL, Ruby, Perl, PHP
+                        </span>
+                      </>
                     )}
                   </div>
                 </div>
