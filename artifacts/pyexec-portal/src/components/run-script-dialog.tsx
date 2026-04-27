@@ -732,7 +732,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   // it keeps reading the error, fixing the code, and re-running until smooth.
   useEffect(() => {
     if (!result) return;
-    if (!aiFixAutoMode || !isAdmin) return;
+    if (!aiFixAutoMode) return;
     if (aiFixLoading || running) return;
 
     // Update the latest history entry with the outcome of the just-finished run.
@@ -760,7 +760,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     const t = setTimeout(() => { fixAndRerun(); }, 500);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, aiFixAutoMode, isAdmin, aiFixLoading, running]);
+  }, [result, aiFixAutoMode, aiFixLoading, running]);
 
   async function applyAiFix() {
     if (!aiFixProposal) return;
@@ -1443,7 +1443,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             {!result.stdout && !result.stderr && (
               <p className="text-xs italic text-muted-foreground">No output produced.</p>
             )}
-            {isAdmin && (aiFixHistory.length > 0 || (!result.success && (aiFixAutoMode || aiFixLoading))) && (
+            {(aiFixHistory.length > 0 || (!result.success && (aiFixAutoMode || aiFixLoading))) && (
               <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-3">
                 {/* Header — always shows JARVIS Auto-Fix status + toggle */}
                 <div className="flex items-start gap-2">
@@ -1580,13 +1580,6 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
               </div>
             )}
 
-            {/* Non-admins still get a hint that admins can auto-fix */}
-            {!result.success && !isAdmin && (
-              <div className="border border-muted/40 bg-muted/20 rounded-md p-3 text-xs text-muted-foreground flex items-start gap-2">
-                <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>The script failed. JARVIS Auto-Fix can repair the code, but it requires an admin. Please contact a script admin.</span>
-              </div>
-            )}
           </div>
         )}
 

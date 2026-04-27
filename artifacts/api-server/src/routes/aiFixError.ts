@@ -71,9 +71,9 @@ router.post("/scripts/:id/ai-fix-error", requireAuth, async (req, res) => {
   try {
     const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
     if (!me) return res.status(401).json({ error: "User not found" });
-    if (me.role !== "admin") {
-      return res.status(403).json({ error: "Only admins can use AI fix" });
-    }
+    // JARVIS Auto-Fix is a universal feature — anyone authenticated who can
+    // run the script can ask JARVIS to analyse the failure. Apply step below
+    // also accepts non-admins so the auto-fix loop completes end-to-end.
 
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
@@ -172,7 +172,8 @@ router.post("/scripts/:id/ai-fix-error/apply", requireAuth, async (req, res) => 
   try {
     const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
     if (!me) return res.status(401).json({ error: "User not found" });
-    if (me.role !== "admin") return res.status(403).json({ error: "Admin only" });
+    // JARVIS Auto-Fix applies to any authenticated user. The audit trail
+    // records who applied the fix.
 
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
