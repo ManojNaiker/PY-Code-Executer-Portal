@@ -289,6 +289,13 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
   // extractor only re-extracts when the bundle actually changed (when the
   // admin uploads a new script or the Python version is bumped).
   const crypto = await import("node:crypto");
+  // The template version is mixed into the hash so when we ship a new launcher
+  // template (e.g. embed-all fix, manifest changes, diagnostic logging), every
+  // re-downloaded EXE gets a NEW hash and re-extracts on first run instead of
+  // silently reusing a previously broken extraction in %LOCALAPPDATA% via the
+  // .ready marker. Bump this string whenever main.go or pruneWindowsPython
+  // logic changes in a way that affects the on-disk bundle layout.
+  const TEMPLATE_VERSION = "v3-embed-all-init";
   const buildHash = crypto
     .createHash("sha256")
     .update(opts.scriptCode)
@@ -298,6 +305,8 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
     .update(installedPackages.join(","))
     .update("\0")
     .update(bundledPython ? "py3.11.9" : "system")
+    .update("\0")
+    .update(TEMPLATE_VERSION)
     .digest("hex")
     .slice(0, 16);
   const assetsGo = `package main

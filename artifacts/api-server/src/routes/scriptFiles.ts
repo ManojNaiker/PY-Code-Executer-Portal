@@ -279,9 +279,10 @@ router.get("/scripts/:id/download", requireAuth, async (req, res) => {
   }
 });
 
-// Build & download as EXE (any user with access).
-// Returns a single .exe when there are no supporting files,
-// otherwise a .zip containing the .exe and the supporting files.
+// Build & download EXE only (any user with access). Always returns a single
+// .exe regardless of whether the script has supporting files. Supporting
+// files are bundled INSIDE the EXE already and are also available separately
+// via /scripts/:id/supporting for users who need raw access.
 router.get("/scripts/:id/exe", requireAuth, async (req, res) => {
   let cleanup: (() => Promise<void>) | null = null;
   try {
@@ -322,35 +323,61 @@ router.get("/scripts/:id/exe", requireAuth, async (req, res) => {
       details: { hasSupportingFiles: supportAbs.length > 0 },
     });
 
-    if (supportAbs.length === 0) {
-      res.setHeader("Content-Type", "application/octet-stream");
-      res.setHeader("Content-Disposition", `attachment; filename="${safeBase}.exe"`);
-      const stream = fs.createReadStream(built.exePath);
-      stream.on("close", () => { cleanup?.(); });
-      stream.on("error", () => { cleanup?.(); });
-      stream.pipe(res);
-      return;
-    }
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${safeBase}.zip"`);
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.on("error", (err) => {
-      req.log.error({ err }, "archiver error during exe bundle");
-      try { res.status(500).end(); } catch {}
-    });
-    archive.on("end", () => { cleanup?.(); });
-    archive.pipe(res);
-
-    archive.file(built.exePath, { name: `${safeBase}.exe` });
-    for (const f of supportAbs) {
-      archive.file(f.absPath, { name: f.name });
-    }
-
-    await archive.finalize();
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeBase}.exe"`);
+    const stream = fs.createReadStream(built.exePath);
+    stream.on("close", () => { cleanup?.(); });
+    stream.on("error", () => { cleanup?.(); });
+    stream.pipe(res);
   } catch (err) {
     req.log.error({ err }, "Error building EXE");
     if (cleanup) await cleanup();
+    if (!res.headersSent) res.status(500).json({ error: (err as Error).message || "Internal server error" });
+  }
+});
+
+// Download supporting files only as a ZIP. Returns 404 when the script has no
+// supporting files. Used when a user wants the raw input data files (CSVs,
+// templates, sample inputs) WITHOUT the EXE — e.g. to inspect or edit them
+// before running.
+router.get("/scripts/:id/supporting", requireAuth, async (req, res) => {
+  try {
+    const ctx = await loadScriptOrDeny(req, res, false);
+    if (!ctx) return;
+    const script = ctx.script;
+    const supporting = (script.supportingFiles ?? []) as Array<{ name: string; path: string; size: number }>;
+
+    const supportAbs = supporting
+      .map((f) => ({ name: f.name, absPath: path.resolve(process.cwd(), f.path) }))
+      .filter((f) => f.absPath.startsWith(UPLOAD_ROOT) && fs.existsSync(f.absPath));
+
+    if (supportAbs.length === 0) {
+      res.status(404).json({ error: "This script has no supporting files." });
+      return;
+    }
+
+    const baseName = (script.filename || "script.py").replace(/\.py$/i, "") || "script";
+    const safeBase = baseName.replace(/[^A-Za-z0-9._\- ]/g, "_") || "script";
+
+    await logAudit({
+      req, userId: ctx.me.clerkId, userEmail: ctx.me.email,
+      action: "script.supporting.download", resourceType: "script", resourceId: ctx.id,
+    });
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeBase}-supporting-files.zip"`);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      req.log.error({ err }, "archiver error during supporting download");
+      try { res.status(500).end(); } catch {}
+    });
+    archive.pipe(res);
+    for (const f of supportAbs) {
+      archive.file(f.absPath, { name: f.name });
+    }
+    await archive.finalize();
+  } catch (err) {
+    req.log.error({ err }, "Error building supporting files download");
     if (!res.headersSent) res.status(500).json({ error: (err as Error).message || "Internal server error" });
   }
 });

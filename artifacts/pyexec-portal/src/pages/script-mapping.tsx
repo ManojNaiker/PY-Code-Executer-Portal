@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
-  Play, Download, FileCode2, Search, Plus, Pencil, Trash2,
+  Play, Download, Paperclip, FileCode2, Search, Plus, Pencil, Trash2,
   FolderPlus, Folder, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { Link } from "wouter";
@@ -131,8 +131,11 @@ export default function ScriptMapping() {
     }
   }
 
-  function handleDownload(script: { id: number; name: string }) {
-    window.location.href = `/api/scripts/${script.id}/download`;
+  function handleDownloadExe(script: { id: number; name: string }) {
+    window.location.href = `/api/scripts/${script.id}/exe`;
+  }
+  function handleDownloadSupporting(script: { id: number; name: string }) {
+    window.location.href = `/api/scripts/${script.id}/supporting`;
   }
 
   async function confirmDeleteFolder(f: FolderApi) {
@@ -297,11 +300,20 @@ export default function ScriptMapping() {
                             </Button>
                             <Button
                               variant="outline" size="sm" className="h-8 w-8 p-0"
-                              title="Download"
-                              onClick={() => handleDownload({ id: script.id, name: script.name })}
+                              title="Download EXE"
+                              onClick={() => handleDownloadExe({ id: script.id, name: script.name })}
                             >
                               <Download className="h-3.5 w-3.5" />
                             </Button>
+                            {(script.supportingFiles?.length ?? 0) > 0 && (
+                              <Button
+                                variant="outline" size="sm" className="h-8 w-8 p-0"
+                                title={`Download supporting files (${script.supportingFiles?.length})`}
+                                onClick={() => handleDownloadSupporting({ id: script.id, name: script.name })}
+                              >
+                                <Paperclip className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             <Button
                               variant="outline" size="sm" asChild title="Manage / details" className="h-8 w-8 p-0"
                             >
