@@ -23,6 +23,30 @@ const BUILD_ROOT = path.resolve(process.cwd(), ".cache/exe-builds");
 const GO_CACHE = path.resolve(os.homedir(), ".cache/go");
 const RSRC_BIN = path.join(GO_CACHE, "bin", "rsrc");
 
+let rsrcInstallPromise: Promise<boolean> | null = null;
+async function ensureRsrc(): Promise<boolean> {
+  if (fs.existsSync(RSRC_BIN)) return true;
+  if (rsrcInstallPromise) return rsrcInstallPromise;
+  rsrcInstallPromise = (async () => {
+    const env = {
+      ...process.env,
+      GOPATH: GO_CACHE,
+      GOCACHE: path.join(GO_CACHE, "build-cache"),
+      GOMODCACHE: path.join(GO_CACHE, "mod"),
+      GOBIN: path.join(GO_CACHE, "bin"),
+    };
+    const r = await runCmd("go", ["install", "github.com/akavel/rsrc@latest"], { env, timeoutMs: 120_000 }).catch(
+      (err) => ({ code: -1, stdout: "", stderr: String(err) }),
+    );
+    if (r.code !== 0 || !fs.existsSync(RSRC_BIN)) {
+      rsrcInstallPromise = null;
+      return false;
+    }
+    return true;
+  })();
+  return rsrcInstallPromise;
+}
+
 function safeIdent(s: string): string {
   return (s || "Script").replace(/[^A-Za-z0-9_\-]/g, "_").slice(0, 80) || "Script";
 }
@@ -293,9 +317,21 @@ func init() {
   // 4. Embed Windows icon + application manifest into the EXE via rsrc.
   // The icon makes the EXE look like a real branded app (Adobe / LibreOffice
   // style) in Explorer / taskbar / Start menu. The manifest declares the app
-  // identity, requested execution level (asInvoker, no UAC prompt), and
-  // common controls dependency, which all help reduce SmartScreen noise.
+  // identity, requested execution level (asInvoker, no UAC prompt), DPI
+  // awareness (prevents tkinter blurry text + silent crashes on high-DPI
+  // monitors), and common controls dependency. Without the manifest, Windows
+  // treats the EXE as legacy and may silently block child process spawning
+  // from %LOCALAPPDATA% — which is exactly what we use to extract pythonw.exe.
+  // Installing rsrc is auto-attempted on first build via ensureRsrc().
+  let manifestEmbedded = false;
+  let manifestError = "";
   try {
+    const haveRsrc = await ensureRsrc();
+    if (!haveRsrc) {
+      manifestError = "rsrc tool unavailable; could not install via 'go install github.com/akavel/rsrc@latest'";
+      throw new Error(manifestError);
+    }
+
     let icoCreated = false;
     if (opts.logo) {
       const lb = await fsp.readFile(opts.logo.absPath);
@@ -329,6 +365,14 @@ func init() {
       <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
     </dependentAssembly>
   </dependency>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2,PerMonitor</dpiAwareness>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
@@ -348,10 +392,18 @@ func init() {
     const renv = { ...process.env, GOPATH: GO_CACHE, GOCACHE: path.join(GO_CACHE, "build-cache") };
     const r = await runCmd(RSRC_BIN, args, { cwd: buildDir, env: renv, timeoutMs: 30_000 });
     if (r.code !== 0) {
+      manifestError = `rsrc exited ${r.code}: ${r.stderr.slice(0, 300)}`;
       await fsp.unlink(path.join(buildDir, "rsrc.syso")).catch(() => {});
+    } else if (fs.existsSync(path.join(buildDir, "rsrc.syso"))) {
+      manifestEmbedded = true;
     }
-  } catch {
-    // Non-fatal — proceed without icon/manifest.
+  } catch (err) {
+    if (!manifestError) manifestError = (err as Error).message;
+  }
+  if (!manifestEmbedded) {
+    bundleNote = bundleNote
+      ? `${bundleNote} WARNING: Windows manifest could not be embedded (${manifestError}). The EXE may fail silently on Windows 11 / SmartScreen-protected machines.`
+      : `WARNING: Windows manifest could not be embedded (${manifestError}). The EXE may fail silently on Windows 11 / SmartScreen-protected machines.`;
   }
 
   // 5. Cross-compile to Windows EXE.
