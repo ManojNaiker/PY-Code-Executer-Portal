@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2, Sparkles, ShieldAlert, Wand2, Check } from "lucide-react";
+import { Play, FileSpreadsheet, Terminal, AlertCircle, CheckCircle2, Clock, Upload, MonitorPlay, Keyboard, Package, Download, Loader2, Sparkles, ShieldAlert, Wand2, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -208,6 +208,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const isAdmin = user?.role === "admin";
 
   const [aiFixOpen, setAiFixOpen] = useState(false);
+  const [showAiDetails, setShowAiDetails] = useState(false);
   const [aiFixLoading, setAiFixLoading] = useState(false);
   const [aiFixApplying, setAiFixApplying] = useState(false);
   // JARVIS Auto-Fix is ON by default for admins (Replit/Grok-style auto error resolver).
@@ -857,16 +858,31 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
               </span>
             </div>
             {aiSchema.codeEnhanced && aiSchema.codeChanges && aiSchema.codeChanges.length > 0 && (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-1.5">
-                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAiDetails(v => !v)}
+                  className="w-full flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity"
+                  aria-expanded={showAiDetails}
+                >
                   <Wand2 className="h-3.5 w-3.5 shrink-0" />
-                  Script enhanced by JARVIS — code has been improved
-                </div>
-                <ul className="text-xs text-foreground/70 space-y-0.5 pl-5 list-disc">
-                  {aiSchema.codeChanges.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
+                  <span className="text-left flex-1">
+                    Script enhanced by JARVIS — {aiSchema.codeChanges.length} improvement{aiSchema.codeChanges.length === 1 ? "" : "s"}
+                  </span>
+                  <span className="text-[11px] font-medium underline-offset-2 hover:underline">
+                    {showAiDetails ? "Hide" : "View"}
+                  </span>
+                  {showAiDetails
+                    ? <ChevronUp className="h-3.5 w-3.5 shrink-0" />
+                    : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
+                </button>
+                {showAiDetails && (
+                  <ul className="text-xs text-foreground/70 space-y-0.5 pl-5 mt-2 list-disc">
+                    {aiSchema.codeChanges.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
           </div>
