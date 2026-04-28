@@ -3,6 +3,8 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import { spawn } from "node:child_process";
+import { ensureWindowsPython, copyTree, installWindowsWheels } from "./windowsPython";
+import { extractTopLevelImports, importToPackage as importToPipPackage } from "./pythonDeps";
 
 // process.cwd() at runtime is `artifacts/api-server`. Resolve template path
 // relative to cwd, with fallbacks so it also works from the workspace root.
@@ -91,7 +93,45 @@ export interface BuildExeOptions {
 export interface BuildExeResult {
   exePath: string;
   cleanup: () => Promise<void>;
+  bundledPython: boolean;
+  installedPackages: string[];
+  failedPackages: { pkg: string; error: string }[];
+  bundleNote: string;
 }
+
+// Modules that ship inside the standalone Windows Python distribution and
+// should never be installed via pip.
+const PY_STDLIB_AND_BUILTINS = new Set([
+  "abc","aifc","antigravity","argparse","ast","asynchat","asyncio","asyncore",
+  "atexit","audioop","base64","bdb","binascii","bisect","builtins","bz2",
+  "calendar","cgi","cgitb","chunk","cmath","cmd","code","codecs","codeop",
+  "collections","colorsys","compileall","concurrent","configparser","contextlib",
+  "contextvars","copy","copyreg","cProfile","crypt","csv","ctypes","curses",
+  "dataclasses","datetime","dbm","decimal","difflib","dis","distutils","doctest",
+  "email","encodings","ensurepip","enum","errno","faulthandler","fcntl","filecmp",
+  "fileinput","fnmatch","fractions","ftplib","functools","gc","genericpath",
+  "getopt","getpass","gettext","glob","graphlib","grp","gzip","hashlib","heapq",
+  "hmac","html","http","idlelib","imaplib","imghdr","imp","importlib","inspect",
+  "io","ipaddress","itertools","json","keyword","lib2to3","linecache","locale",
+  "logging","lzma","mailbox","mailcap","marshal","math","mimetypes","mmap",
+  "modulefinder","msilib","msvcrt","multiprocessing","netrc","nis","nntplib",
+  "ntpath","nturl2path","numbers","opcode","operator","optparse","os","ossaudiodev",
+  "pathlib","pdb","pickle","pickletools","pipes","pkgutil","platform","plistlib",
+  "poplib","posix","posixpath","pprint","profile","pstats","pty","pwd","py_compile",
+  "pyclbr","pydoc","pydoc_data","pyexpat","queue","quopri","random","re","readline",
+  "reprlib","resource","rlcompleter","runpy","sched","secrets","select","selectors",
+  "shelve","shlex","shutil","signal","site","smtpd","smtplib","sndhdr","socket",
+  "socketserver","spwd","sqlite3","sre_compile","sre_constants","sre_parse","ssl",
+  "stat","statistics","string","stringprep","struct","subprocess","sunau","symtable",
+  "sys","sysconfig","syslog","tabnanny","tarfile","telnetlib","tempfile","termios",
+  "test","textwrap","this","threading","time","timeit","tkinter","token","tokenize",
+  "tomllib","trace","traceback","tracemalloc","tty","turtle","turtledemo","types",
+  "typing","unicodedata","unittest","urllib","uu","uuid","venv","warnings","wave",
+  "weakref","webbrowser","winreg","winsound","wsgiref","xdrlib","xml","xmlrpc",
+  "zipapp","zipfile","zipimport","zlib","zoneinfo","_thread","__future__","__main__",
+  // Tkinter sub-imports
+  "Tkinter","tkMessageBox","tkSimpleDialog","tkFileDialog","tkColorChooser","tkFont","tkconstants",
+]);
 
 export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
   await fsp.mkdir(BUILD_ROOT, { recursive: true });
@@ -161,6 +201,37 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
     }
   }
 
+  // 2c. Bundle a complete standalone Windows Python distribution + any third-party
+  // packages the script imports. The result is a fully self-contained EXE that
+  // runs on Windows without Python installed.
+  let bundledPython = false;
+  let installedPackages: string[] = [];
+  let failedPackages: { pkg: string; error: string }[] = [];
+  let bundleNote = "";
+  try {
+    const pyDir = await ensureWindowsPython();
+    const targetPyDir = path.join(bundleDir, "python");
+    await copyTree(pyDir, targetPyDir);
+    bundledPython = true;
+
+    // Detect third-party imports the script needs and try to install matching
+    // Windows wheels into the bundled site-packages.
+    const imports = extractTopLevelImports(opts.scriptCode);
+    const thirdParty = imports.filter((m) => !PY_STDLIB_AND_BUILTINS.has(m) && !m.startsWith("_"));
+    if (thirdParty.length > 0) {
+      const pkgs = Array.from(new Set(thirdParty.map(importToPipPackage)));
+      const sitePackages = path.join(targetPyDir, "Lib", "site-packages");
+      const r = await installWindowsWheels(pkgs, sitePackages);
+      installedPackages = r.installed;
+      failedPackages = r.failed;
+      if (r.failed.length > 0) {
+        bundleNote = `Some packages have no Windows wheel and could not be bundled: ${r.failed.map((f) => f.pkg).join(", ")}.`;
+      }
+    }
+  } catch (err) {
+    bundleNote = `Failed to bundle Windows Python: ${(err as Error).message}. The EXE will fall back to system Python on the user's machine.`;
+  }
+
   // 3. Generate assets.go with build-time constants.
   const assetsGo = `package main
 
@@ -169,6 +240,7 @@ func init() {
 \tscriptFilename = ${escGoString(safeFilename)}
 \thasLogo = ${opts.logo ? "true" : "false"}
 \tlogoFilename = ${escGoString(logoFilename)}
+\thasBundledPython = ${bundledPython ? "true" : "false"}
 }
 `;
   await fsp.writeFile(path.join(buildDir, "assets.go"), assetsGo, "utf8");
@@ -251,7 +323,7 @@ func init() {
   const result = await runCmd("go", ["build", "-trimpath", "-ldflags=-s -w -H windowsgui", "-o", "output.exe", "."], {
     cwd: buildDir,
     env,
-    timeoutMs: 180_000,
+    timeoutMs: 600_000,
   });
   if (result.code !== 0) {
     throw new Error(`Go build failed: ${result.stderr || result.stdout}`);
@@ -262,6 +334,10 @@ func init() {
 
   return {
     exePath,
+    bundledPython,
+    installedPackages,
+    failedPackages,
+    bundleNote,
     cleanup: async () => {
       await fsp.rm(buildDir, { recursive: true, force: true }).catch(() => {});
     },
