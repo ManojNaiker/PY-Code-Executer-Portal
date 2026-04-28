@@ -62,8 +62,7 @@ export function Layout({ children }: { children: ReactNode }) {
       ]
     : [
         { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        { title: "Scripts", href: "/scripts", icon: Code2 },
-        { title: "Audit Log", href: "/admin/audit", icon: ShieldAlert },
+        { title: "Script Mapping", href: "/script-mapping", icon: FolderTree },
       ];
 
   const adminItems = [
