@@ -260,6 +260,25 @@ router.post("/users/bulk", requireAuth, async (req, res) => {
   res.status(201).json({ created, failed });
 });
 
+router.post("/users/:clerkId/reset-password", requireAuth, async (req, res) => {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return;
+  const target = req.params.clerkId;
+  try {
+    const targetUser = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, target) });
+    if (!targetUser) return res.status(404).json({ error: "User not found" });
+    const requested = String(req.body?.password || "").trim();
+    const newPassword = requested.length >= 6 ? requested : "changeme123";
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await db.update(usersTable).set({ passwordHash, updatedAt: new Date() }).where(eq(usersTable.clerkId, target));
+    await logAudit({ req, userId: admin.clerkId, userEmail: admin.email, action: "user.reset_password", resourceType: "user", resourceId: target, details: { email: targetUser.email } });
+    res.json({ ok: true, email: targetUser.email, newPassword });
+  } catch (err) {
+    req.log.error({ err }, "Error resetting password");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.delete("/users/:clerkId", requireAuth, async (req, res) => {
   const admin = await requireAdmin(req, res);
   if (!admin) return;

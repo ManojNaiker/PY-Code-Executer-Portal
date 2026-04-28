@@ -20,7 +20,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { ShieldCheck, User, Plus, Upload, Trash2 } from "lucide-react";
+import { ShieldCheck, User, Plus, Upload, Trash2, KeyRound, Copy, Check } from "lucide-react";
 import type { AssignRoleBodyRole } from "@workspace/api-client-react/src/generated/api.schemas";
 
 export default function AdminUsers() {
@@ -60,6 +60,15 @@ export default function AdminUsers() {
   const [newDeptId, setNewDeptId] = useState<string>("none");
   const [creating, setCreating] = useState(false);
 
+  // ---- Credentials banner shown after create / reset ----
+  const [credentials, setCredentials] = useState<null | { email: string; password: string; mode: "created" | "reset" }>(null);
+  const [credCopied, setCredCopied] = useState(false);
+
+  // ---- Reset password dialog state ----
+  const [resetTarget, setResetTarget] = useState<null | { clerkId: string; email: string }>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
+
   // ---- Bulk import dialog state ----
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
@@ -77,6 +86,9 @@ export default function AdminUsers() {
 
   async function handleCreate() {
     if (!newEmail.trim()) return;
+    const emailToCreate = newEmail.trim();
+    const typedPassword = newPassword.trim();
+    const passwordToUse = typedPassword.length >= 6 ? typedPassword : "changeme123";
     setCreating(true);
     try {
       const r = await fetch("/api/users", {
@@ -84,8 +96,8 @@ export default function AdminUsers() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          email: newEmail.trim(),
-          password: newPassword || undefined,
+          email: emailToCreate,
+          password: passwordToUse,
           firstName: newFirstName || null,
           lastName: newLastName || null,
           role: newRole,
@@ -96,10 +108,8 @@ export default function AdminUsers() {
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${r.status}`);
       }
-      toast({
-        title: "User created",
-        description: newPassword ? `Password set for ${newEmail}.` : `Default password "changeme123" assigned to ${newEmail}.`,
-      });
+      setCredentials({ email: emailToCreate, password: passwordToUse, mode: "created" });
+      setCredCopied(false);
       setCreateOpen(false);
       setNewEmail(""); setNewPassword(""); setNewFirstName(""); setNewLastName("");
       setNewRole("user"); setNewDeptId("none");
@@ -109,6 +119,35 @@ export default function AdminUsers() {
     } finally {
       setCreating(false);
     }
+  }
+
+  async function handleResetPassword() {
+    if (!resetTarget) return;
+    setResetting(true);
+    try {
+      const r = await fetch(`/api/users/${encodeURIComponent(resetTarget.clerkId)}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password: resetPassword.trim() || undefined }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setCredentials({ email: j.email, password: j.newPassword, mode: "reset" });
+      setCredCopied(false);
+      setResetTarget(null);
+      setResetPassword("");
+    } catch (e: any) {
+      toast({ title: "Failed to reset password", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  async function copyCredentials() {
+    if (!credentials) return;
+    const text = `Email: ${credentials.email}\nPassword: ${credentials.password}`;
+    try { await navigator.clipboard.writeText(text); setCredCopied(true); setTimeout(() => setCredCopied(false), 2000); } catch {}
   }
 
   function parseBulkUsers(text: string) {
@@ -236,25 +275,28 @@ export default function AdminUsers() {
               <DialogHeader>
                 <DialogTitle>Create User</DialogTitle>
               </DialogHeader>
-              <div className="space-y-3 py-2">
+              <form className="space-y-3 py-2" autoComplete="off" onSubmit={e => e.preventDefault()}>
+                {/* Honeypot fields to absorb browser autofill */}
+                <input type="text" name="prevent_autofill" autoComplete="off" value="" onChange={() => {}} style={{ display: "none" }} />
+                <input type="password" name="prevent_autofill_pw" autoComplete="new-password" value="" onChange={() => {}} style={{ display: "none" }} />
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label>First name</Label>
-                    <Input value={newFirstName} onChange={e => setNewFirstName(e.target.value)} />
+                    <Input autoComplete="off" value={newFirstName} onChange={e => setNewFirstName(e.target.value)} />
                   </div>
                   <div className="space-y-1">
                     <Label>Last name</Label>
-                    <Input value={newLastName} onChange={e => setNewLastName(e.target.value)} />
+                    <Input autoComplete="off" value={newLastName} onChange={e => setNewLastName(e.target.value)} />
                   </div>
                 </div>
                 <div className="space-y-1">
                   <Label>Email *</Label>
-                  <Input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="user@example.com" />
+                  <Input type="email" autoComplete="off" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="user@example.com" />
                 </div>
                 <div className="space-y-1">
                   <Label>Password</Label>
-                  <Input type="text" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank for &quot;changeme123&quot;" />
-                  <p className="text-xs text-muted-foreground">Minimum 6 characters.</p>
+                  <Input type="text" autoComplete="new-password" name="new-user-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder='Leave blank for "changeme123"' />
+                  <p className="text-xs text-muted-foreground">Minimum 6 characters. If you leave it blank, the default password <code>changeme123</code> is used.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -292,6 +334,65 @@ export default function AdminUsers() {
           </>
         }
       />
+
+      {credentials && (
+        <div className="mb-4 border-2 border-primary rounded-lg p-4 bg-primary/5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <p className="font-semibold text-primary">
+                {credentials.mode === "created" ? "User created — share these credentials" : "Password reset — share these credentials"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This is the only time the password is shown. Copy it now and give it to the user.
+              </p>
+              <div className="mt-2 grid grid-cols-[80px_1fr] gap-x-3 gap-y-1 text-sm font-mono">
+                <span className="text-muted-foreground">Email:</span>
+                <span>{credentials.email}</span>
+                <span className="text-muted-foreground">Password:</span>
+                <span className="font-bold">{credentials.password}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={copyCredentials}>
+                {credCopied ? <><Check className="mr-2 h-4 w-4"/> Copied</> : <><Copy className="mr-2 h-4 w-4"/> Copy</>}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setCredentials(null)}>Dismiss</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={!!resetTarget} onOpenChange={(o) => { if (!o) { setResetTarget(null); setResetPassword(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Set a new password for <b>{resetTarget?.email}</b>. Leave blank to reset to the default <code>changeme123</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-3 py-2" autoComplete="off" onSubmit={e => e.preventDefault()}>
+            <input type="password" name="prevent_autofill_pw_reset" autoComplete="new-password" value="" onChange={() => {}} style={{ display: "none" }} />
+            <div className="space-y-1">
+              <Label>New password</Label>
+              <Input
+                type="text"
+                autoComplete="new-password"
+                name="reset-user-password"
+                value={resetPassword}
+                onChange={e => setResetPassword(e.target.value)}
+                placeholder='Leave blank for "changeme123"'
+              />
+              <p className="text-xs text-muted-foreground">Minimum 6 characters.</p>
+            </div>
+          </form>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setResetTarget(null); setResetPassword(""); }}>Cancel</Button>
+            <Button onClick={handleResetPassword} disabled={resetting}>
+              {resetting ? "Resetting..." : "Reset Password"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="border rounded-lg overflow-hidden bg-card">
           <Table>
@@ -349,9 +450,17 @@ export default function AdminUsers() {
                       {format(new Date(user.createdAt), "MMM d, yyyy")}
                     </TableCell>
                     <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Reset password"
+                        onClick={() => { setResetTarget({ clerkId: user.clerkId, email: user.email }); setResetPassword(""); }}
+                      >
+                        <KeyRound className="h-4 w-4" />
+                      </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={deleting === user.clerkId}>
+                          <Button variant="ghost" size="icon" title="Delete user" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={deleting === user.clerkId}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </AlertDialogTrigger>
