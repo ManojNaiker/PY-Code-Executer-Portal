@@ -74,6 +74,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
       .groupBy(departmentsTable.name);
 
     const recentActivity = await db.select().from(auditLogsTable)
+      .where(me.role === "admin" ? undefined : eq(auditLogsTable.userId, userId))
       .orderBy(desc(auditLogsTable.createdAt))
       .limit(10);
 
