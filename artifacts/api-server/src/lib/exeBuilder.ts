@@ -3,7 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { ensureWindowsPython, copyTree, installWindowsWheels } from "./windowsPython";
+import { ensureWindowsPython, copyTree, installWindowsWheels, pruneWindowsPython, detectStdlibNeeds } from "./windowsPython";
 import { extractTopLevelImports, importToPackage as importToPipPackage } from "./pythonDeps";
 
 // process.cwd() at runtime is `artifacts/api-server`. Resolve template path
@@ -228,6 +228,28 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
         bundleNote = `Some packages have no Windows wheel and could not be bundled: ${r.failed.map((f) => f.pkg).join(", ")}.`;
       }
     }
+
+    // Prune the bundled Python distribution down to a minimal runtime to
+    // shrink the resulting EXE. Detection considers both the script source
+    // AND any pip-installed packages — e.g. requests pulls in ssl, openpyxl
+    // pulls in nothing extra, sqlalchemy pulls in sqlite3.
+    const stdlibNeeds = detectStdlibNeeds(opts.scriptCode);
+    const pkgNames = installedPackages.map((p) => p.toLowerCase());
+    const sslHeavyPkgs = ["requests", "httpx", "aiohttp", "urllib3", "boto3", "botocore", "google-api-python-client", "openai", "anthropic"];
+    const sqlitePkgs = ["sqlalchemy", "alembic", "django", "peewee"];
+    const tkinterPkgs = ["matplotlib", "pillow"]; // matplotlib has TkAgg backend; pillow has ImageTk
+    const needsSsl = stdlibNeeds.needsSsl || pkgNames.some((p) => sslHeavyPkgs.includes(p));
+    const needsSqlite = stdlibNeeds.needsSqlite || pkgNames.some((p) => sqlitePkgs.includes(p));
+    const needsTkinter = stdlibNeeds.needsTkinter || pkgNames.some((p) => tkinterPkgs.includes(p));
+    const pruned = await pruneWindowsPython(targetPyDir, {
+      keepSsl: needsSsl,
+      keepSqlite: needsSqlite,
+      keepTkinter: needsTkinter,
+    });
+    const mb = (pruned.bytesFreed / (1024 * 1024)).toFixed(1);
+    bundleNote = bundleNote
+      ? `${bundleNote} (Trimmed ${mb} MB of unused runtime)`
+      : `Trimmed ${mb} MB of unused runtime files.`;
   } catch (err) {
     bundleNote = `Failed to bundle Windows Python: ${(err as Error).message}. The EXE will fall back to system Python on the user's machine.`;
   }

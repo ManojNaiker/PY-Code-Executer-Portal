@@ -31,7 +31,7 @@ Enterprise Python Code Execution Platform. Users can upload Python scripts, orga
 - `src/lib/windowsPython.ts` downloads & caches `astral-sh/python-build-standalone` (cpython-3.11.9 install_only) to `~/.cache/pyexec-win-py/`. Used to bundle a complete Python interpreter into every generated EXE.
 - `src/lib/exeBuilder.ts` builds Windows EXEs via Go cross-compile (GOOS=windows GOARCH=amd64). Each EXE embeds: the .py script, supporting files, optional logo, **the entire Python distribution under `bundle/python/`**, and any third-party pip wheels needed by the script (installed via `pip install --platform win_amd64 --python-version 3.11 --abi cp311 --only-binary=:all:` into `bundle/python/Lib/site-packages/`).
 - `exe-template/main.go` extracts `bundle/` to a hidden cache at `%LOCALAPPDATA%\PyExecPortal\<scriptName>-<buildHash>\` (PyInstaller `--onefile` style — user never sees extracted files). Re-extracts only when `buildHash` changes. Runs the script with `cwd = exeDir` so any output files (logs, exports) the script writes land next to the EXE where the user expects them. Uses the bundled `python\python.exe`; falls back to system Python only if the bundled tree is missing.
-- Resulting EXE is ~80–90 MB (because it ships a full Python runtime).
+- After bundling, `pruneWindowsPython()` strips ~100 MB of unused runtime (debug `.pdb` files, pip/setuptools/venv/idlelib/test, plus tcl-tk/sqlite3/ssl when the script doesn't need them — detected via `detectStdlibNeeds()` + a heuristic list of pip packages that pull each in). Final EXE size: ~17 MB minimal, ~24 MB with SSL/HTTP, ~28 MB with tkinter, ~25 MB with `requests`.
 
 ### Backend (`artifacts/api-server`)
 - Express 5 API server
