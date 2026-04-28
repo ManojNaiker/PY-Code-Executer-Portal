@@ -183,14 +183,32 @@ class _Widget:
         return v if v is not None else ""
 
     def _is_file_picker(self):
+        # Detect ONLY widgets that clearly target a file/path. The previous
+        # heuristic also matched generic verbs like "select" / "browse" /
+        # "upload", which produced false positives for labels like
+        # "Select S3 Bucket:" or "Choose Region" — the shim then returned
+        # the uploaded file path in place of the user's actual selection,
+        # causing downstream errors (e.g. AWS rejecting the file path as a
+        # bucket name). We now require an explicit file-related noun.
         label_lower = (self._assoc_label or "").lower()
         name_lower = (str(self._name) or "").lower()
         tv_name = (str(getattr(self._textvariable, "_name", "")) or "").lower()
         haystack = " ".join((label_lower, name_lower, tv_name))
-        return any(tok in haystack for tok in (
-            "file", "path", "csv", "excel", "xlsx", "xls", "sheet",
-            "workbook", "json", "image", "select", "browse", "upload",
-        ))
+        # Strong indicators — any one of these reliably means "file path".
+        if any(tok in haystack for tok in (
+            "file", "path", "filename", "filepath",
+            "csv", "tsv", "excel", "xlsx", "xls", "xlsm", "xlsb",
+            "workbook", "spreadsheet", "sheet ",  # trailing space avoids "google sheets in bucket name"
+            "json", "yaml", "xml", "txt",
+            "pdf", "doc", "docx",
+            "image", "photo", "picture", "ico", "png", "jpg", "jpeg",
+        )):
+            return True
+        # Weak indicators (verbs) only count when paired with an obvious
+        # file noun — and "select"/"choose"/"pick" alone are NOT enough
+        # because they're used for buckets, regions, dropdowns, etc.
+        verbs = ("browse", "upload", "open file", "save file", "load file")
+        return any(v in haystack for v in verbs)
     def current(self, idx=None):
         if idx is None:
             try:
