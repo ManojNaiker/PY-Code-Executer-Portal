@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -134,7 +136,29 @@ func pause() {
 	_, _ = os.Stdin.Read(b[:])
 }
 
+// diagLog writes a diagnostic log file next to the EXE so the user has a
+// way to see what happened when a GUI build silently fails. The log records
+// the timestamps, paths, command line, exit code, and the tail of stderr.
+type diagLog struct {
+	path string
+	buf  bytes.Buffer
+}
+
+func newDiagLog(exeDir string) *diagLog {
+	return &diagLog{path: filepath.Join(exeDir, scriptName+".log")}
+}
+
+func (l *diagLog) printf(format string, a ...any) {
+	fmt.Fprintf(&l.buf, format+"\n", a...)
+}
+
+func (l *diagLog) flush() {
+	_ = os.WriteFile(l.path, l.buf.Bytes(), 0o644)
+}
+
 func run() int {
+	startedAt := time.Now()
+
 	exePath, err := os.Executable()
 	if err != nil {
 		if isGuiBuild {
@@ -146,66 +170,136 @@ func run() int {
 	}
 	exeDir := filepath.Dir(exePath)
 
+	log := newDiagLog(exeDir)
+	defer log.flush()
+	log.printf("=== %s @ %s ===", scriptName, startedAt.Format(time.RFC3339))
+	log.printf("EXE:        %s", exePath)
+	log.printf("EXE dir:    %s", exeDir)
+	log.printf("Build hash: %s", buildHash)
+	log.printf("GUI build:  %v", isGuiBuild)
+	log.printf("OS args:    %v", os.Args)
+
 	workDir, err := extractRoot()
 	if err != nil {
+		log.printf("ERROR resolving cache dir: %v", err)
 		if isGuiBuild {
-			showError("Cannot resolve cache directory: " + err.Error())
+			showError("Cannot resolve cache directory: " + err.Error() + "\n\nLog: " + log.path)
 		} else {
 			fmt.Fprintln(os.Stderr, "Cannot resolve cache directory:", err)
 		}
 		return 1
 	}
+	log.printf("Work dir:   %s", workDir)
+
+	extractStart := time.Now()
 	if err := extractAll(workDir); err != nil {
+		log.printf("ERROR extracting bundle: %v", err)
 		if isGuiBuild {
-			showError("Extraction failed: " + err.Error())
+			showError("Extraction failed: " + err.Error() + "\n\nLog: " + log.path)
 		} else {
 			fmt.Fprintln(os.Stderr, "Extraction failed:", err)
 		}
 		return 1
 	}
+	log.printf("Extracted in %s", time.Since(extractStart).Round(time.Millisecond))
 
 	py, err := findPython(workDir)
 	if err != nil {
 		msg := "Python is not installed and no bundled Python was included.\n\nPlease install Python 3 from https://www.python.org/downloads/"
+		log.printf("ERROR finding python: %v", err)
 		if isGuiBuild {
-			showError(msg)
+			showError(msg + "\n\nLog: " + log.path)
 		} else {
 			fmt.Fprintln(os.Stderr, msg)
 		}
 		return 1
 	}
+	log.printf("Python:     %s", py)
 
 	scriptPath := filepath.Join(workDir, scriptFilename)
 	args := append([]string{scriptPath}, os.Args[1:]...)
+	log.printf("Command:    %s %s", py, strings.Join(args, " "))
+
 	cmd := exec.Command(py, args...)
 	// Run with cwd = the EXE's folder so any files the script creates
 	// (logs, exports, undo_log.txt, etc.) land next to the EXE where the
 	// user expects them — NOT in the hidden extract directory.
 	cmd.Dir = exeDir
 
-	// Inherit stdio so console scripts print straight to the user's console.
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Force UTF-8 for the child Python so emoji / non-ASCII print() output
+	// doesn't crash on Windows code page 1252.
+	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "PYTHONUNBUFFERED=1")
 
-	// In GUI mode, suppress any subprocess console window the child might
-	// try to spawn. In console mode, we WANT the child to inherit our
-	// console for stdout/stderr to flow through, so do NOT set the flag.
+	// Capture stderr (and stdout for GUI) to a buffer so we can log it AND
+	// show it in the error dialog. For CLI builds we ALSO inherit so the
+	// user sees output live in the console.
+	var stderrBuf bytes.Buffer
+
 	if isGuiBuild {
+		// In GUI mode the parent has NO console — passing os.Stdin/Stdout/
+		// Stderr to the child gives invalid handles and on some Windows
+		// configurations causes pythonw.exe to silently fail at startup.
+		// Capture to a buffer instead so we can surface errors.
+		cmd.Stdin = nil
+		cmd.Stdout = &stderrBuf
+		cmd.Stderr = &stderrBuf
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	} else {
+		// CLI mode: inherit so print() goes to the console live, but ALSO
+		// tee stderr into our buffer so the run.log captures any traceback.
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = &teeWriter{primary: os.Stderr, secondary: &stderrBuf}
 	}
 
+	runStart := time.Now()
 	exitCode := 0
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
+	runErr := cmd.Run()
+	runDur := time.Since(runStart).Round(time.Millisecond)
+	log.printf("Ran in:     %s", runDur)
+
+	if runErr != nil {
+		if ee, ok := runErr.(*exec.ExitError); ok {
 			exitCode = ee.ExitCode()
+			log.printf("Exit code:  %d", exitCode)
 		} else {
+			log.printf("ERROR running script: %v", runErr)
 			if isGuiBuild {
-				showError("Failed to run script: " + err.Error())
+				tail := tailString(stderrBuf.String(), 1500)
+				msg := "Failed to run script: " + runErr.Error()
+				if tail != "" {
+					msg += "\n\n--- Python output ---\n" + tail
+				}
+				msg += "\n\nFull log: " + log.path
+				showError(msg)
 			} else {
-				fmt.Fprintln(os.Stderr, "Failed to run script:", err)
+				fmt.Fprintln(os.Stderr, "Failed to run script:", runErr)
 			}
 			exitCode = 1
+		}
+	} else {
+		log.printf("Exit code:  0")
+	}
+
+	// Always log captured python output (helpful even on success).
+	if stderrBuf.Len() > 0 {
+		log.printf("--- python stderr/stdout ---")
+		log.printf("%s", stderrBuf.String())
+	}
+
+	// For GUI builds with a non-zero exit code, surface the script's traceback
+	// in a MessageBox so the user knows WHY it crashed instead of seeing
+	// "nothing happens".
+	if isGuiBuild && exitCode != 0 && runErr != nil {
+		// Already shown above for non-ExitError case; for ExitError we still
+		// want to show the traceback since pythonw swallows the console.
+		if _, ok := runErr.(*exec.ExitError); ok {
+			tail := tailString(stderrBuf.String(), 1500)
+			if tail != "" {
+				showError(fmt.Sprintf("Script exited with code %d.\n\n--- Output ---\n%s\n\nFull log: %s", exitCode, tail, log.path))
+			} else {
+				showError(fmt.Sprintf("Script exited with code %d (no output).\n\nFull log: %s", exitCode, log.path))
+			}
 		}
 	}
 
@@ -216,6 +310,25 @@ func run() int {
 		pause()
 	}
 	return exitCode
+}
+
+// tailString returns the last n characters of s.
+func tailString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "..." + s[len(s)-n:]
+}
+
+// teeWriter writes to two writers (used to tee CLI stderr to both console and log buffer).
+type teeWriter struct {
+	primary   *os.File
+	secondary *bytes.Buffer
+}
+
+func (t *teeWriter) Write(p []byte) (int, error) {
+	t.secondary.Write(p)
+	return t.primary.Write(p)
 }
 
 func main() {
