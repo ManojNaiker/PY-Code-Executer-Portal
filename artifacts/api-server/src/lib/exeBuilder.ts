@@ -208,6 +208,10 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
   let installedPackages: string[] = [];
   let failedPackages: { pkg: string; error: string }[] = [];
   let bundleNote = "";
+  let needsSsl = false;
+  let needsSqlite = false;
+  let needsTkinter = false;
+  let isGuiScript = false;
   try {
     const pyDir = await ensureWindowsPython();
     const targetPyDir = path.join(bundleDir, "python");
@@ -238,9 +242,11 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
     const sslHeavyPkgs = ["requests", "httpx", "aiohttp", "urllib3", "boto3", "botocore", "google-api-python-client", "openai", "anthropic"];
     const sqlitePkgs = ["sqlalchemy", "alembic", "django", "peewee"];
     const tkinterPkgs = ["matplotlib", "pillow"]; // matplotlib has TkAgg backend; pillow has ImageTk
-    const needsSsl = stdlibNeeds.needsSsl || pkgNames.some((p) => sslHeavyPkgs.includes(p));
-    const needsSqlite = stdlibNeeds.needsSqlite || pkgNames.some((p) => sqlitePkgs.includes(p));
-    const needsTkinter = stdlibNeeds.needsTkinter || pkgNames.some((p) => tkinterPkgs.includes(p));
+    const guiPkgs = ["pyqt5", "pyqt6", "pyside2", "pyside6", "wxpython", "kivy", "pygame", "customtkinter", "ttkbootstrap", "ttkthemes"];
+    needsSsl = stdlibNeeds.needsSsl || pkgNames.some((p) => sslHeavyPkgs.includes(p));
+    needsSqlite = stdlibNeeds.needsSqlite || pkgNames.some((p) => sqlitePkgs.includes(p));
+    needsTkinter = stdlibNeeds.needsTkinter || pkgNames.some((p) => tkinterPkgs.includes(p));
+    isGuiScript = needsTkinter || pkgNames.some((p) => guiPkgs.includes(p)) || /\b(?:import|from)\s+(?:PyQt5|PyQt6|PySide2|PySide6|wx|kivy|pygame|customtkinter|ttkbootstrap)\b/.test(opts.scriptCode);
     const pruned = await pruneWindowsPython(targetPyDir, {
       keepSsl: needsSsl,
       keepSqlite: needsSqlite,
@@ -279,6 +285,7 @@ func init() {
 \tlogoFilename = ${escGoString(logoFilename)}
 \thasBundledPython = ${bundledPython ? "true" : "false"}
 \tbuildHash = ${escGoString(buildHash)}
+\tisGuiBuild = ${isGuiScript ? "true" : "false"}
 }
 `;
   await fsp.writeFile(path.join(buildDir, "assets.go"), assetsGo, "utf8");
@@ -358,7 +365,10 @@ func init() {
     GOCACHE: path.join(GO_CACHE, "build-cache"),
     GOMODCACHE: path.join(GO_CACHE, "mod"),
   };
-  const result = await runCmd("go", ["build", "-trimpath", "-ldflags=-s -w -H windowsgui", "-o", "output.exe", "."], {
+  // Console subsystem (default) for CLI scripts so users see print() output in
+  // a terminal window. Windows GUI subsystem only for tkinter/PyQt/etc. scripts.
+  const ldflags = isGuiScript ? "-s -w -H windowsgui" : "-s -w";
+  const result = await runCmd("go", ["build", "-trimpath", `-ldflags=${ldflags}`, "-o", "output.exe", "."], {
     cwd: buildDir,
     env,
     timeoutMs: 600_000,
