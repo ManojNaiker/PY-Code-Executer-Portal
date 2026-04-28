@@ -322,7 +322,7 @@ export default function AdminUsers() {
                     </Select>
                   </div>
                 </div>
-              </div>
+              </form>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
                 <Button onClick={handleCreate} disabled={creating || !newEmail.trim()}>
