@@ -24,10 +24,39 @@ var (
 	hasLogo          = false
 	logoFilename     = ""
 	hasBundledPython = false
+	buildHash        = "dev"
 )
 
+// extractRoot returns the hidden cache directory where the bundle is unpacked.
+// We use %LOCALAPPDATA% so the user never sees these files in Explorer when
+// they double-click the EXE — same approach PyInstaller --onefile uses.
+func extractRoot() (string, error) {
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		base = os.Getenv("APPDATA")
+	}
+	if base == "" {
+		base = os.TempDir()
+	}
+	dir := filepath.Join(base, "PyExecPortal", scriptName+"-"+buildHash)
+	return dir, nil
+}
+
+// extractAll walks the embedded bundle and writes every file to targetDir.
+// A marker file (.ready) records the buildHash; if it already matches the
+// current build we skip the entire extraction (very fast subsequent launches).
 func extractAll(targetDir string) error {
-	return fs.WalkDir(bundleFS, "bundle", func(p string, d fs.DirEntry, err error) error {
+	marker := filepath.Join(targetDir, ".ready")
+	if data, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(data)) == buildHash {
+		return nil
+	}
+	// Stale or missing marker — wipe the directory so partial extracts from
+	// a previous version cannot pollute the new one.
+	_ = os.RemoveAll(targetDir)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return err
+	}
+	err := fs.WalkDir(bundleFS, "bundle", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -47,28 +76,20 @@ func extractAll(targetDir string) error {
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return err
 		}
-		// The .py script is always refreshed so admin updates take effect.
-		// The bundled python tree is also always refreshed (so package
-		// upgrades from the server take effect on next download).
-		// Other bundled files (logo, sample data, configs) are preserved
-		// if the user has edited them locally.
-		if strings.EqualFold(rel, scriptFilename) ||
-			strings.HasPrefix(filepath.ToSlash(rel), "python/") {
-			return os.WriteFile(out, data, 0o644)
-		}
-		if _, err := os.Stat(out); err == nil {
-			return nil
-		}
 		return os.WriteFile(out, data, 0o644)
 	})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(marker, []byte(buildHash), 0o644)
 }
 
 // findPython prefers the bundled Python distribution. Falls back to system
 // Python only if the bundled tree is missing (legacy builds without it).
 func findPython(workDir string) (string, error) {
 	if hasBundledPython {
-		// Prefer pythonw.exe so no console window flashes for GUI scripts,
-		// but use python.exe for CLI scripts so output stays visible.
+		// pythonw.exe runs without flashing a console; python.exe is the fallback.
+		// python-build-standalone does not always ship pythonw, so we try both.
 		candidates := []string{
 			filepath.Join(workDir, "python", "pythonw.exe"),
 			filepath.Join(workDir, "python", "python.exe"),
@@ -92,6 +113,7 @@ func showError(msg string) {
 	mb := user32.NewProc("MessageBoxW")
 	title, _ := syscall.UTF16PtrFromString(scriptName)
 	body, _ := syscall.UTF16PtrFromString(msg)
+	// MB_OK | MB_ICONERROR
 	mb.Call(0, uintptr(unsafe.Pointer(body)), uintptr(unsafe.Pointer(title)), 0x10)
 }
 
@@ -101,12 +123,13 @@ func run() int {
 		showError("Cannot resolve EXE path: " + err.Error())
 		return 1
 	}
-	workDir := filepath.Join(filepath.Dir(exePath), scriptName+"_files")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		showError("Cannot create work directory: " + err.Error())
+	exeDir := filepath.Dir(exePath)
+
+	workDir, err := extractRoot()
+	if err != nil {
+		showError("Cannot resolve cache directory: " + err.Error())
 		return 1
 	}
-
 	if err := extractAll(workDir); err != nil {
 		showError("Extraction failed: " + err.Error())
 		return 1
@@ -114,16 +137,27 @@ func run() int {
 
 	py, err := findPython(workDir)
 	if err != nil {
-		showError("Python is not installed and no bundled Python was included.\n\nPlease install Python 3 from https://www.python.org/downloads/\nMake sure to tick \"Add Python to PATH\" during installation.")
+		showError("Python is not installed and no bundled Python was included.\n\nPlease install Python 3 from https://www.python.org/downloads/")
 		return 1
 	}
 
 	scriptPath := filepath.Join(workDir, scriptFilename)
 	args := append([]string{scriptPath}, os.Args[1:]...)
 	cmd := exec.Command(py, args...)
-	cmd.Dir = workDir
-	// Hide any subprocess console window.
+	// Run with cwd = the EXE's folder so any files the script creates
+	// (logs, exports, undo_log.txt, etc.) land next to the EXE where the
+	// user expects them — NOT in the hidden extract directory.
+	cmd.Dir = exeDir
+
+	// Forward stdio so console scripts still print, and so the EXE returns
+	// the script's actual exit code.
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Hide any subprocess console window the child might try to spawn.
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()

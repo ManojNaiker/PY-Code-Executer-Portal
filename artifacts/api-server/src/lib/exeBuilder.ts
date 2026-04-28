@@ -233,6 +233,21 @@ export async function buildExe(opts: BuildExeOptions): Promise<BuildExeResult> {
   }
 
   // 3. Generate assets.go with build-time constants.
+  // buildHash uniquely identifies this EXE's bundle contents so the runtime
+  // extractor only re-extracts when the bundle actually changed (when the
+  // admin uploads a new script or the Python version is bumped).
+  const crypto = await import("node:crypto");
+  const buildHash = crypto
+    .createHash("sha256")
+    .update(opts.scriptCode)
+    .update("\0")
+    .update(safeFilename)
+    .update("\0")
+    .update(installedPackages.join(","))
+    .update("\0")
+    .update(bundledPython ? "py3.11.9" : "system")
+    .digest("hex")
+    .slice(0, 16);
   const assetsGo = `package main
 
 func init() {
@@ -241,6 +256,7 @@ func init() {
 \thasLogo = ${opts.logo ? "true" : "false"}
 \tlogoFilename = ${escGoString(logoFilename)}
 \thasBundledPython = ${bundledPython ? "true" : "false"}
+\tbuildHash = ${escGoString(buildHash)}
 }
 `;
   await fsp.writeFile(path.join(buildDir, "assets.go"), assetsGo, "utf8");
