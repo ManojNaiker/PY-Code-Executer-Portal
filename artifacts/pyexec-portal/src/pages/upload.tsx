@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { FileUp, Upload as UploadIcon, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { FolderTreeSelect } from "@/components/folder-tree-select";
 
 const SUPPORTED_EXTENSIONS = [
   ".py", ".pyw", ".ipynb",
@@ -269,10 +270,13 @@ export default function Upload() {
                   <FormItem>
                     <FormLabel>Subject / Folder</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Finance, HR, Reports" {...field} />
+                      <FolderTreeSelect
+                        value={field.value ?? ""}
+                        onChange={field.onChange}
+                      />
                     </FormControl>
                     <FormDescription>
-                      Scripts are grouped by Subject in the Script Mapping view.
+                      Pick an existing folder from the tree, or create a custom name.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

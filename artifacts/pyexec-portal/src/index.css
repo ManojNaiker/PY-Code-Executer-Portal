@@ -61,55 +61,54 @@
 }
 
 /* =====================================================================
-   Light theme — refined corporate palette
-   Primary: deep navy/indigo. Backgrounds: cool off-white.
-   Borders: soft slate. Designed for an enterprise admin portal.
+   Light theme — bubbly & colorful
+   Vibrant indigo primary, soft pastel surfaces, generous radius.
    ===================================================================== */
 :root {
-  --background: 210 20% 98%;
-  --foreground: 222 47% 11%;
+  --background: 230 60% 99%;
+  --foreground: 230 35% 14%;
 
   --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --card-border: 220 13% 91%;
+  --card-foreground: 230 35% 14%;
+  --card-border: 230 25% 90%;
 
   --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --popover-border: 220 13% 91%;
+  --popover-foreground: 230 35% 14%;
+  --popover-border: 230 25% 90%;
 
-  /* Deep professional navy */
-  --primary: 222 47% 20%;
-  --primary-foreground: 210 40% 98%;
+  /* Vibrant indigo */
+  --primary: 250 84% 60%;
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 210 17% 95%;
-  --secondary-foreground: 222 47% 20%;
+  --secondary: 250 60% 96%;
+  --secondary-foreground: 250 60% 30%;
 
-  --muted: 210 16% 96%;
-  --muted-foreground: 215 16% 47%;
+  --muted: 230 40% 96%;
+  --muted-foreground: 230 15% 46%;
 
-  --accent: 217 91% 95%;
-  --accent-foreground: 222 47% 20%;
+  --accent: 280 90% 96%;
+  --accent-foreground: 270 60% 35%;
 
-  --destructive: 0 72% 51%;
+  --destructive: 350 85% 58%;
   --destructive-foreground: 0 0% 100%;
 
-  --border: 220 13% 91%;
-  --input: 220 13% 91%;
-  --ring: 222 47% 20%;
+  --border: 230 25% 90%;
+  --input: 230 25% 90%;
+  --ring: 250 84% 60%;
 
-  --sidebar: 222 47% 13%;
-  --sidebar-foreground: 215 20% 80%;
-  --sidebar-border: 222 30% 20%;
-  --sidebar-primary: 217 91% 60%;
+  --sidebar: 248 50% 16%;
+  --sidebar-foreground: 240 30% 88%;
+  --sidebar-border: 248 35% 24%;
+  --sidebar-primary: 270 95% 70%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 222 40% 20%;
+  --sidebar-accent: 248 40% 24%;
   --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 217 91% 60%;
+  --sidebar-ring: 270 95% 70%;
 
   --app-font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --app-font-serif: 'Source Serif Pro', Georgia, serif;
   --app-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --radius: 0.5rem;
+  --radius: 0.95rem;
 }
 
 /* =====================================================================
@@ -171,6 +170,18 @@
     @apply font-sans antialiased bg-background text-foreground;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     letter-spacing: -0.005em;
+    background-image:
+      radial-gradient(at 12% 8%, hsl(250 95% 92% / 0.55) 0px, transparent 55%),
+      radial-gradient(at 88% 92%, hsl(285 95% 92% / 0.5) 0px, transparent 55%),
+      radial-gradient(at 90% 12%, hsl(200 95% 92% / 0.4) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(at 12% 8%, hsl(250 60% 22% / 0.6) 0px, transparent 55%),
+      radial-gradient(at 88% 92%, hsl(285 60% 20% / 0.55) 0px, transparent 55%),
+      radial-gradient(at 90% 12%, hsl(200 60% 18% / 0.45) 0px, transparent 50%);
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -203,9 +214,23 @@
 @layer components {
   /* Polished card surface used by shadcn Card */
   [data-slot="card"], .card-surface {
+    border-radius: calc(var(--radius) + 4px);
     box-shadow:
       0 1px 0 hsl(var(--card-border) / 0.6),
-      0 1px 2px 0 hsl(222 47% 11% / 0.04),
-      0 1px 3px 0 hsl(222 47% 11% / 0.05);
+      0 6px 18px -8px hsl(250 60% 30% / 0.12),
+      0 2px 6px 0 hsl(250 60% 30% / 0.06);
+    transition: box-shadow 200ms ease, transform 200ms ease;
+  }
+
+  [data-slot="card"]:hover {
+    box-shadow:
+      0 1px 0 hsl(var(--card-border) / 0.6),
+      0 14px 28px -10px hsl(250 70% 40% / 0.18),
+      0 4px 10px 0 hsl(250 60% 30% / 0.08);
+  }
+
+  /* Bubbly gradient surface helper */
+  .surface-gradient {
+    background-image: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--accent) / 0.6) 100%);
   }
 }

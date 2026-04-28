@@ -162,7 +162,16 @@ export default function ScriptsList() {
         }
       />
 
-      {scripts && scripts.length > 0 && (() => {
+      {(!scripts || scripts.length === 0) ? (
+        <div className="text-center py-12 border rounded-2xl bg-card border-dashed">
+          <FileCode2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-medium">No scripts found</h3>
+          <p className="text-muted-foreground mb-4">Upload a script to get started.</p>
+          <Button asChild>
+            <Link href="/upload">Upload Script</Link>
+          </Button>
+        </div>
+      ) : (() => {
         const subjectsInUse = new Set((scripts as any[]).map(s => (s.subject ?? "").trim()).filter(Boolean));
         const merged = [
           ...folders.filter(f => subjectsInUse.has(f.name) || subjectsInUse.size === 0).map(f => ({ name: f.name, icon: f.icon, color: f.color })),
@@ -171,57 +180,76 @@ export default function ScriptsList() {
             .map(s => ({ name: s, icon: "Folder", color: "slate" })),
         ];
         const hasUncat = (scripts as any[]).some(s => !s.subject);
-        if (merged.length === 0 && !hasUncat) return null;
-        return (
-          <div className="flex gap-2 flex-wrap mb-6 -mt-2">
-            <button
-              onClick={() => setFolderFilter("all")}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${folderFilter === "all" ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-accent"}`}
-            >
-              All ({scripts.length})
-            </button>
-            {merged.map(f => {
-              const c = getColor(f.color);
-              const Icn = getIcon(f.icon);
-              const count = (scripts as any[]).filter(s => (s.subject ?? "") === f.name).length;
-              const active = folderFilter === f.name;
-              return (
-                <button
-                  key={f.name}
-                  onClick={() => setFolderFilter(f.name)}
-                  className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-colors ${active ? `${c.bg} ${c.text} ${c.border}` : "bg-card hover:bg-accent"}`}
-                >
-                  <Icn className={`h-3.5 w-3.5 ${active ? c.text : "text-muted-foreground"}`} />
-                  {f.name} ({count})
-                </button>
-              );
-            })}
-            {hasUncat && (
-              <button
-                onClick={() => setFolderFilter("__none__")}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${folderFilter === "__none__" ? "bg-accent" : "bg-card hover:bg-accent"}`}
-              >
-                Uncategorized ({(scripts as any[]).filter(s => !s.subject).length})
-              </button>
-            )}
-          </div>
+        const filtered = (scripts as any[]).filter(s =>
+          folderFilter === "all" ? true : folderFilter === "__none__" ? !s.subject : (s.subject ?? "") === folderFilter
         );
-      })()}
+        return (
+          <div className="grid gap-6 md:grid-cols-[260px_1fr]">
+            <aside className="rounded-2xl border bg-card p-3 h-fit md:sticky md:top-4">
+              <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <FileCode2 className="h-3.5 w-3.5" />
+                Folders
+              </div>
+              <div className="space-y-1 mt-1">
+                <button
+                  onClick={() => setFolderFilter("all")}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm transition-colors ${folderFilter === "all" ? "bg-primary text-primary-foreground font-medium shadow-sm" : "hover:bg-accent/40"}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={`h-6 w-6 rounded-md flex items-center justify-center ${folderFilter === "all" ? "bg-white/20" : "bg-primary/10 text-primary"}`}>
+                      <FileCode2 className="h-3.5 w-3.5" />
+                    </span>
+                    All scripts
+                  </span>
+                  <span className={`text-xs ${folderFilter === "all" ? "opacity-90" : "text-muted-foreground"}`}>{scripts.length}</span>
+                </button>
+                {merged.map(f => {
+                  const c = getColor(f.color);
+                  const Icn = getIcon(f.icon);
+                  const count = (scripts as any[]).filter(s => (s.subject ?? "") === f.name).length;
+                  const active = folderFilter === f.name;
+                  return (
+                    <button
+                      key={f.name}
+                      onClick={() => setFolderFilter(f.name)}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm transition-colors ${active ? `${c.bg} ${c.text} font-medium` : "hover:bg-accent/40"}`}
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className={`h-6 w-6 rounded-md flex items-center justify-center ${c.bg} ${c.text} border ${c.border}`}>
+                          <Icn className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="truncate">{f.name}</span>
+                      </span>
+                      <span className={`text-xs ${active ? c.text : "text-muted-foreground"}`}>{count}</span>
+                    </button>
+                  );
+                })}
+                {hasUncat && (
+                  <button
+                    onClick={() => setFolderFilter("__none__")}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm transition-colors ${folderFilter === "__none__" ? "bg-accent text-accent-foreground font-medium" : "hover:bg-accent/40"}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="h-6 w-6 rounded-md flex items-center justify-center bg-muted text-muted-foreground border">
+                        <FileCode2 className="h-3.5 w-3.5" />
+                      </span>
+                      Uncategorized
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {(scripts as any[]).filter(s => !s.subject).length}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </aside>
 
-      {(!scripts || scripts.length === 0) ? (
-        <div className="text-center py-12 border rounded-lg bg-card border-dashed">
-          <FileCode2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium">No scripts found</h3>
-          <p className="text-muted-foreground mb-4">Upload a script to get started.</p>
-          <Button asChild>
-            <Link href="/upload">Upload Script</Link>
-          </Button>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {(scripts as any[])
-            .filter(s => folderFilter === "all" ? true : folderFilter === "__none__" ? !s.subject : (s.subject ?? "") === folderFilter)
-            .map(script => (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filtered.length === 0 && (
+                <div className="col-span-full text-center py-12 border rounded-2xl bg-card border-dashed text-sm text-muted-foreground">
+                  No scripts in this folder.
+                </div>
+              )}
+              {filtered.map(script => (
             <Card key={script.id} className="flex flex-col">
               <CardHeader>
                 <div className="flex justify-between items-start">
@@ -300,9 +328,11 @@ export default function ScriptsList() {
                 )}
               </CardFooter>
             </Card>
-          ))}
-        </div>
-      )}
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {runTarget && (
         <RunScriptDialog
