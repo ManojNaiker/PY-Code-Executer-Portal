@@ -322,13 +322,15 @@ export default function ScriptMapping() {
                                 </Button>
                               );
                             })()}
-                            <Button
-                              variant="outline" size="sm" asChild title="Manage / details" className="h-8 w-8 p-0"
-                            >
-                              <Link href={`/scripts/${script.id}`}>
-                                <FileCode2 className="h-3.5 w-3.5" />
-                              </Link>
-                            </Button>
+                            {isAdmin && (
+                              <Button
+                                variant="outline" size="sm" asChild title="Manage / details" className="h-8 w-8 p-0"
+                              >
+                                <Link href={`/scripts/${script.id}`}>
+                                  <FileCode2 className="h-3.5 w-3.5" />
+                                </Link>
+                              </Button>
+                            )}
                           </div>
                         </div>
                       ))
