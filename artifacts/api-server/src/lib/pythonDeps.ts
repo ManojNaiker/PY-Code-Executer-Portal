@@ -19,6 +19,18 @@ const PACKAGE_NAME_MAP: Record<string, string> = {
   OpenSSL: "pyOpenSSL",
   google: "google-cloud",
   win32com: "pywin32",
+  win32api: "pywin32",
+  win32con: "pywin32",
+  win32event: "pywin32",
+  win32file: "pywin32",
+  win32gui: "pywin32",
+  win32print: "pywin32",
+  win32process: "pywin32",
+  win32security: "pywin32",
+  win32service: "pywin32",
+  win32clipboard: "pywin32",
+  pythoncom: "pywin32",
+  pywintypes: "pywin32",
   skimage: "scikit-image",
   matplotlib: "matplotlib",
   pandas: "pandas",
@@ -33,6 +45,35 @@ const PACKAGE_NAME_MAP: Record<string, string> = {
   docx: "python-docx",
   pptx: "python-pptx",
 };
+
+// Modules that only exist on Windows. They cannot be installed on this Linux
+// server, but they will work when the script is bundled into a Windows EXE.
+// We mark them as "windowsOnly" so the UI shows a friendly hint instead of a
+// failed pip install.
+const WINDOWS_ONLY_MODULES: Set<string> = new Set([
+  "win32api",
+  "win32con",
+  "win32event",
+  "win32file",
+  "win32gui",
+  "win32print",
+  "win32process",
+  "win32security",
+  "win32service",
+  "win32clipboard",
+  "win32com",
+  "pythoncom",
+  "pywintypes",
+  "winreg",
+  "winsound",
+  "msvcrt",
+  "_winreg",
+  "winerror",
+]);
+
+export function isWindowsOnlyModule(mod: string): boolean {
+  return WINDOWS_ONLY_MODULES.has(mod);
+}
 
 let stdlibCache: Set<string> | null = null;
 let installedCache: Set<string> | null = null;
@@ -300,6 +341,13 @@ export async function ensureDependencies(code: string): Promise<DepInstallResult
 
   for (const mod of imports) {
     if (stdlib.has(mod)) continue;
+    if (isWindowsOnlyModule(mod)) {
+      // Skip — these only exist on Windows. They will be bundled into the EXE
+      // via the Windows Python distribution + pywin32 wheel, but cannot run
+      // on this Linux server.
+      log(`[deps] Skipping ${mod} — Windows-only module (will be bundled with EXE).`);
+      continue;
+    }
     if (await isInstalled(mod)) continue;
     const pkg = importToPackage(mod);
     result.attempted.push(pkg);
@@ -331,6 +379,7 @@ export type DepStatus = {
   module: string;
   package: string;
   installed: boolean;
+  windowsOnly?: boolean;
 };
 
 export async function checkDependencies(code: string): Promise<DepStatus[]> {
@@ -342,6 +391,13 @@ export async function checkDependencies(code: string): Promise<DepStatus[]> {
   for (const mod of imports) {
     if (stdlib.has(mod)) continue;
     const pkg = importToPackage(mod);
+    if (isWindowsOnlyModule(mod)) {
+      // Windows-only modules can't be installed on this Linux server, but the
+      // EXE builder bundles pywin32 + the Windows Python distribution, so the
+      // built EXE will have them. Treat as "available" (installed) for run UX.
+      out.push({ module: mod, package: pkg, installed: true, windowsOnly: true });
+      continue;
+    }
     out.push({ module: mod, package: pkg, installed: await isInstalled(mod) });
   }
   return out;

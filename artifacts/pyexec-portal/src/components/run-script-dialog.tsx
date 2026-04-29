@@ -139,7 +139,7 @@ function hasSoftError(r: ExecResult | null): boolean {
   return PATTERNS.some((re) => re.test(text));
 }
 
-type DepStatus = { module: string; package: string; installed: boolean };
+type DepStatus = { module: string; package: string; installed: boolean; windowsOnly?: boolean };
 
 type AiHint = {
   label: string;
@@ -930,7 +930,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
               <span className="text-sm font-semibold">Dependencies</span>
               {deps && deps.length > 0 && (
                 <Badge variant="outline" className="ml-auto text-[10px]">
-                  {deps.filter((d) => d.installed).length}/{deps.length} installed
+                  {deps.filter((d) => d.installed && !d.windowsOnly).length}/{deps.filter((d) => !d.windowsOnly).length} installed
                 </Badge>
               )}
             </div>
@@ -945,21 +945,36 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                     <Badge
                       key={d.module}
                       variant={d.installed ? "secondary" : "outline"}
-                      className={`text-[11px] gap-1 ${d.installed ? "" : "border-amber-500/50 text-amber-600 dark:text-amber-400"}`}
+                      className={`text-[11px] gap-1 ${
+                        d.windowsOnly
+                          ? "border-sky-500/50 text-sky-600 dark:text-sky-400"
+                          : d.installed
+                          ? ""
+                          : "border-amber-500/50 text-amber-600 dark:text-amber-400"
+                      }`}
+                      title={d.windowsOnly ? "Windows-only module — bundled into the EXE, not installed on this Linux server" : undefined}
                     >
-                      {d.installed ? (
+                      {d.windowsOnly ? (
+                        <Package className="h-3 w-3" />
+                      ) : d.installed ? (
                         <CheckCircle2 className="h-3 w-3 text-emerald-500" />
                       ) : (
                         <AlertCircle className="h-3 w-3" />
                       )}
                       <span className="font-mono">{d.package}</span>
+                      {d.windowsOnly && <span className="opacity-70">·win</span>}
                     </Badge>
                   ))}
                 </div>
-                {deps.some((d) => !d.installed) ? (
+                {deps.some((d) => d.windowsOnly) && (
+                  <p className="text-[11px] text-sky-600 dark:text-sky-400">
+                    Windows-only modules ({deps.filter((d) => d.windowsOnly).map((d) => d.module).join(", ")}) are skipped on this Linux server — they will be bundled into the Windows EXE when you build it.
+                  </p>
+                )}
+                {deps.some((d) => !d.installed && !d.windowsOnly) ? (
                   <div className="flex items-center gap-2 pt-1">
                     <p className="text-xs text-muted-foreground flex-1">
-                      {deps.filter((d) => !d.installed).length} package(s) not yet installed. Install before running.
+                      {deps.filter((d) => !d.installed && !d.windowsOnly).length} package(s) not yet installed. Install before running.
                     </p>
                     <Button
                       size="sm"
