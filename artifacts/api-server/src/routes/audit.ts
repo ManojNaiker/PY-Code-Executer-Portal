@@ -66,12 +66,28 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
       .from(executionsTable)
       .where(gte(executionsTable.createdAt, oneDayAgo));
 
-    const scriptsByDept = await db.select({
-      departmentName: sql<string>`COALESCE(${departmentsTable.name}, 'Unassigned')`,
-      count: count(),
-    }).from(scriptsTable)
-      .leftJoin(departmentsTable, eq(scriptsTable.departmentId, departmentsTable.id))
-      .groupBy(departmentsTable.name);
+    // Count scripts per department via the script_departments join table.
+    // A script can be assigned to multiple departments; it's counted once per department.
+    // Scripts with zero assignments are bucketed as "Unassigned".
+    const assignedRows = await db.execute<{ department_name: string; count: number }>(sql`
+      SELECT d.name AS department_name, COUNT(sd.script_id)::int AS count
+      FROM departments d
+      LEFT JOIN script_departments sd ON sd.department_id = d.id
+      GROUP BY d.name
+      ORDER BY d.name ASC
+    `);
+    const unassignedRow = await db.execute<{ count: number }>(sql`
+      SELECT COUNT(*)::int AS count FROM scripts s
+      WHERE NOT EXISTS (SELECT 1 FROM script_departments sd WHERE sd.script_id = s.id)
+    `);
+    const scriptsByDept: Array<{ departmentName: string; count: number }> = [];
+    for (const r of assignedRows.rows as any[]) {
+      scriptsByDept.push({ departmentName: r.department_name, count: Number(r.count) });
+    }
+    const unassignedCount = Number((unassignedRow.rows as any[])[0]?.count ?? 0);
+    if (unassignedCount > 0) {
+      scriptsByDept.push({ departmentName: "Unassigned", count: unassignedCount });
+    }
 
     const recentActivity = await db.select().from(auditLogsTable)
       .where(me.role === "admin" ? undefined : eq(auditLogsTable.userId, userId))

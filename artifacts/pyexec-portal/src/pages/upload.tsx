@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FileUp, Upload as UploadIcon, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FolderTreeSelect } from "@/components/folder-tree-select";
+import { DepartmentMultiSelect } from "@/components/department-multi-select";
 
 const SUPPORTED_EXTENSIONS = [
   ".py", ".pyw", ".ipynb",
@@ -94,7 +95,7 @@ const formSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(100),
   description: z.string().max(500).optional(),
   subject: z.string().max(100).optional(),
-  departmentId: z.string().optional(),
+  departmentIds: z.array(z.number()).default([]),
 });
 
 export default function Upload() {
@@ -127,7 +128,7 @@ export default function Upload() {
       name: "",
       description: "",
       subject: "",
-      departmentId: "none",
+      departmentIds: [],
     },
   });
 
@@ -197,8 +198,10 @@ export default function Upload() {
         subject: values.subject?.trim() || null,
         filename: filename,
         code: fileContent,
-        departmentId: values.departmentId && values.departmentId !== "none" ? parseInt(values.departmentId, 10) : null
-      }
+        // Send the multi-dept selection. Backend also accepts legacy `departmentId`
+        // for backward compat but `departmentIds` is the source of truth.
+        departmentIds: values.departmentIds,
+      } as any
     });
   };
 
@@ -299,27 +302,19 @@ export default function Upload() {
 
               <FormField
                 control={form.control}
-                name="departmentId"
+                name="departmentIds"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Department Assignment</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a department" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">Global (All Users)</SelectItem>
-                        {departments?.map(dept => (
-                          <SelectItem key={dept.id} value={dept.id.toString()}>
-                            {dept.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <DepartmentMultiSelect
+                        departments={departments ?? []}
+                        value={field.value ?? []}
+                        onChange={field.onChange}
+                      />
+                    </FormControl>
                     <FormDescription>
-                      Restrict access to users in a specific department.
+                      Pick one or more departments to restrict access. Leave empty for Global (visible to all users).
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

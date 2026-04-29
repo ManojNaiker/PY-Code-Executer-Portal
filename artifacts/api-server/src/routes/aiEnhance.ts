@@ -4,6 +4,7 @@ import { scriptsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 import { requireAuth } from "../middlewares/requireAuth";
+import { userCanAccessScript } from "../lib/scriptAccess";
 import { logAudit } from "../lib/auditLogger";
 import { parseScriptInputs } from "../lib/scriptParser";
 import { aiGenerateText } from "../lib/aiClient";
@@ -398,7 +399,7 @@ router.get("/scripts/:id/ai-schema", requireAuth, async (req, res) => {
     if (!me) return res.status(401).json({ error: "User not found" });
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       return res.status(403).json({ error: "Access denied" });
     }
     res.json({ aiSchema: script.aiSchema ?? null });

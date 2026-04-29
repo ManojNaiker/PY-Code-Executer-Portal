@@ -8,6 +8,7 @@ import * as path from "path";
 import * as os from "os";
 
 import { requireAuth } from "../middlewares/requireAuth";
+import { userCanAccessScript } from "../lib/scriptAccess";
 import { ensureDependencies, getDepsDir } from "../lib/pythonDeps";
 import tkShimSource from "../lib/tkShim.py";
 
@@ -26,7 +27,7 @@ router.post("/scripts/:id/dynamic-options", requireAuth, async (req, res) => {
 
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       return res.status(403).json({ error: "Access denied" });
     }
 

@@ -89,8 +89,14 @@ Tables:
 
 - First user to register becomes admin
 - Admins can see all scripts and manage departments/users
-- Regular users only see scripts assigned to their department (or unassigned scripts)
+- Scripts ↔ Departments is many-to-many via the `script_departments` join table.
+  A script may be assigned to **zero or many** departments:
+  - Zero rows in join table → "Global" (visible to all users)
+  - One or more rows → only users in those departments can access it
+- Regular users only see scripts that are Global OR assigned to one of their departments
 - All actions are recorded in audit_logs
+- Helper: `lib/scriptAccess.ts` exports `userCanAccessScript()`, `getScriptDepartments()`,
+  `setScriptDepartments()`, `filterAccessibleScriptIds()`. Use these instead of inline checks.
 
 ## Admin Management Endpoints (raw fetch on frontend)
 

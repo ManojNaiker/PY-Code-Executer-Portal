@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useQueryClient } from "@tanstack/react-query";
+import { DepartmentMultiSelect } from "@/components/department-multi-select";
 
 export default function ScriptDetail() {
   const [, params] = useRoute("/scripts/:id");
@@ -54,7 +55,7 @@ export default function ScriptDetail() {
   const [editSubject, setEditSubject] = useState("");
   const [editFilename, setEditFilename] = useState("");
   const [editCode, setEditCode] = useState("");
-  const [editDept, setEditDept] = useState("none");
+  const [editDeptIds, setEditDeptIds] = useState<number[]>([]);
   const [editBusy, setEditBusy] = useState(false);
 
   const openEdit = () => {
@@ -64,7 +65,10 @@ export default function ScriptDetail() {
     setEditSubject(script.subject ?? "");
     setEditFilename(script.filename);
     setEditCode(script.code);
-    setEditDept(script.departmentId ? String(script.departmentId) : "none");
+    const ids: number[] = (script as any).departmentIds
+      ?? ((script as any).departments?.map((d: any) => d.id))
+      ?? (script.departmentId ? [script.departmentId] : []);
+    setEditDeptIds(ids);
     setEditOpen(true);
   };
 
@@ -82,7 +86,7 @@ export default function ScriptDetail() {
           subject: editSubject || null,
           filename: editFilename,
           code: editCode,
-          departmentId: editDept === "none" ? null : parseInt(editDept, 10),
+          departmentIds: editDeptIds,
         }),
       });
       if (!r.ok) {
@@ -325,16 +329,12 @@ export default function ScriptDetail() {
                 <Input value={editSubject} onChange={e => setEditSubject(e.target.value)} />
               </div>
               <div className="space-y-1">
-                <Label>Department</Label>
-                <Select value={editDept} onValueChange={setEditDept}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Global / Unassigned</SelectItem>
-                    {departments?.map(d => (
-                      <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Departments</Label>
+                <DepartmentMultiSelect
+                  departments={departments ?? []}
+                  value={editDeptIds}
+                  onChange={setEditDeptIds}
+                />
               </div>
             </div>
             <div className="space-y-1">

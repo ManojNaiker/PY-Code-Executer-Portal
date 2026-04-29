@@ -4,6 +4,7 @@ import { scriptsTable, usersTable, executionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 import { requireAuth } from "../middlewares/requireAuth";
+import { userCanAccessScript } from "../lib/scriptAccess";
 import { logAudit } from "../lib/auditLogger";
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
@@ -188,7 +189,7 @@ router.get("/scripts/:id/inputs", requireAuth, async (req, res) => {
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
 
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
@@ -209,7 +210,7 @@ router.get("/scripts/:id/dependencies", requireAuth, async (req, res) => {
     if (!me) return res.status(401).json({ error: "User not found" });
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       return res.status(403).json({ error: "Access denied" });
     }
     const deps = await checkDependencies(script.code);
@@ -229,7 +230,7 @@ router.post("/scripts/:id/dependencies/install", requireAuth, async (req, res) =
     if (!me) return res.status(401).json({ error: "User not found" });
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       return res.status(403).json({ error: "Access denied" });
     }
     await logAudit({ req, userId, userEmail: me.email, action: "script.deps_install", resourceType: "script", resourceId: id, details: { scriptName: script.name } });
@@ -254,7 +255,7 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
     if (!me) return res.status(401).json({ error: "User not found" });
     script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       await logAudit({ req, userId, userEmail: me.email, action: "script.execute_denied", resourceType: "script", resourceId: id });
       return res.status(403).json({ error: "Access denied" });
     }
@@ -586,7 +587,7 @@ router.post("/scripts/:id/execute", requireAuth, upload.single("file"), async (r
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
     if (!script) return res.status(404).json({ error: "Script not found" });
 
-    if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+    if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
       await logAudit({ req, userId, userEmail: me.email, action: "script.execute_denied", resourceType: "script", resourceId: id });
       return res.status(403).json({ error: "Access denied" });
     }

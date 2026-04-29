@@ -1,15 +1,28 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { scriptsTable, usersTable, departmentsTable } from "@workspace/db";
-import { eq, and, isNull, or } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import { requireAuth } from "../middlewares/requireAuth";
 import { logAudit } from "../lib/auditLogger";
+import {
+  getScriptDepartments,
+  setScriptDepartments,
+  getScriptDepartmentIds,
+  filterAccessibleScriptIds,
+  userCanAccessScript,
+  type DeptRef,
+} from "../lib/scriptAccess";
 import { UploadScriptBody } from "@workspace/api-zod";
 
 const router = Router();
 
-function mapScript(script: any, deptName?: string | null, uploaderName?: string | null) {
+function mapScript(
+  script: any,
+  departments: DeptRef[],
+  uploaderName?: string | null,
+) {
+  const primary = departments[0] ?? null;
   return {
     id: script.id,
     name: script.name,
@@ -17,8 +30,12 @@ function mapScript(script: any, deptName?: string | null, uploaderName?: string 
     subject: script.subject ?? null,
     filename: script.filename,
     code: script.code,
-    departmentId: script.departmentId ?? null,
-    departmentName: deptName ?? null,
+    // Legacy single-department fields kept for backward compat with existing UI.
+    departmentId: primary?.id ?? null,
+    departmentName: primary?.name ?? null,
+    // New: full set of assigned departments. Empty array == "Global" (accessible to all).
+    departments,
+    departmentIds: departments.map(d => d.id),
     uploadedBy: script.uploadedBy,
     uploadedByName: uploaderName ?? null,
     hasLogo: !!script.logoPath,
@@ -26,6 +43,20 @@ function mapScript(script: any, deptName?: string | null, uploaderName?: string 
     createdAt: script.createdAt instanceof Date ? script.createdAt.toISOString() : script.createdAt,
     updatedAt: script.updatedAt instanceof Date ? script.updatedAt.toISOString() : script.updatedAt,
   };
+}
+
+/** Parse a `departmentIds` payload that may be missing, null, a single number, or an array. */
+function coerceDepartmentIds(body: any): number[] | undefined {
+  if (body == null) return undefined;
+  if (Array.isArray(body.departmentIds)) {
+    return body.departmentIds
+      .map((v: any) => (typeof v === "string" ? parseInt(v, 10) : v))
+      .filter((n: any) => Number.isInteger(n) && n > 0);
+  }
+  // Legacy single departmentId (number | null) – treat null as "Global", number as one-element list.
+  if (body.departmentId === null) return [];
+  if (typeof body.departmentId === "number") return [body.departmentId];
+  return undefined;
 }
 
 router.get("/scripts", requireAuth, async (req, res) => {
@@ -37,24 +68,24 @@ router.get("/scripts", requireAuth, async (req, res) => {
 
     const rows = await db.select({
       script: scriptsTable,
-      departmentName: departmentsTable.name,
       uploaderFirstName: usersTable.firstName,
       uploaderLastName: usersTable.lastName,
     }).from(scriptsTable)
-      .leftJoin(departmentsTable, eq(scriptsTable.departmentId, departmentsTable.id))
       .leftJoin(usersTable, eq(scriptsTable.uploadedBy, usersTable.clerkId))
       .orderBy(scriptsTable.createdAt);
 
-    const filtered = me.role === "admin"
-      ? rows
-      : rows.filter(r =>
-          r.script.departmentId === null || r.script.departmentId === me.departmentId
-        );
+    const ids = rows.map(r => r.script.id);
+    const deptMap = await getScriptDepartments(ids);
+    const allowed = await filterAccessibleScriptIds(
+      { role: me.role, departmentId: me.departmentId },
+      ids,
+    );
 
-    res.json(filtered.map(r => mapScript(
+    const visible = rows.filter(r => allowed.has(r.script.id));
+    res.json(visible.map(r => mapScript(
       r.script,
-      r.departmentName,
-      r.uploaderFirstName ? `${r.uploaderFirstName} ${r.uploaderLastName || ""}`.trim() : null
+      deptMap.get(r.script.id) ?? [],
+      r.uploaderFirstName ? `${r.uploaderFirstName} ${r.uploaderLastName || ""}`.trim() : null,
     )));
   } catch (err) {
     req.log.error({ err }, "Error listing scripts");
@@ -76,16 +107,27 @@ router.post("/scripts", requireAuth, async (req, res) => {
       ...parsed.data,
       subject: parsed.data.subject ?? null,
       uploadedBy: userId,
-      departmentId: parsed.data.departmentId ?? null,
+      // departmentId column kept null going forward; assignments live in script_departments.
+      departmentId: null,
     }).returning();
 
+    const deptIds = coerceDepartmentIds(req.body) ?? [];
+    if (deptIds.length > 0) {
+      // Validate that all referenced departments exist before persisting.
+      const existing = await db.select({ id: departmentsTable.id })
+        .from(departmentsTable).where(inArray(departmentsTable.id, deptIds));
+      const validIds = existing.map(d => d.id);
+      await setScriptDepartments(script.id, validIds);
+    }
+
+    const departments = (await getScriptDepartments([script.id])).get(script.id) ?? [];
     await logAudit({
       req, userId, userEmail: me.email,
       action: "script.upload", resourceType: "script", resourceId: script.id,
-      details: { name: script.name, filename: script.filename, departmentId: script.departmentId },
+      details: { name: script.name, filename: script.filename, departmentIds: departments.map(d => d.id) },
     });
 
-    res.status(201).json(mapScript(script));
+    res.status(201).json(mapScript(script, departments));
   } catch (err) {
     req.log.error({ err }, "Error uploading script");
     res.status(500).json({ error: "Internal server error" });
@@ -103,25 +145,25 @@ router.get("/scripts/:id", requireAuth, async (req, res) => {
 
     const [row] = await db.select({
       script: scriptsTable,
-      departmentName: departmentsTable.name,
       uploaderFirstName: usersTable.firstName,
       uploaderLastName: usersTable.lastName,
     }).from(scriptsTable)
-      .leftJoin(departmentsTable, eq(scriptsTable.departmentId, departmentsTable.id))
       .leftJoin(usersTable, eq(scriptsTable.uploadedBy, usersTable.clerkId))
       .where(eq(scriptsTable.id, id));
 
     if (!row) return res.status(404).json({ error: "Not found" });
 
-    if (me.role !== "admin" && row.script.departmentId !== null && row.script.departmentId !== me.departmentId) {
+    const allowed = await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, id);
+    if (!allowed) {
       await logAudit({ req, userId, userEmail: me.email, action: "script.access_denied", resourceType: "script", resourceId: id });
       return res.status(403).json({ error: "Access denied" });
     }
 
+    const departments = (await getScriptDepartments([id])).get(id) ?? [];
     await logAudit({ req, userId, userEmail: me.email, action: "script.view", resourceType: "script", resourceId: id });
     res.json(mapScript(
-      row.script, row.departmentName,
-      row.uploaderFirstName ? `${row.uploaderFirstName} ${row.uploaderLastName || ""}`.trim() : null
+      row.script, departments,
+      row.uploaderFirstName ? `${row.uploaderFirstName} ${row.uploaderLastName || ""}`.trim() : null,
     ));
   } catch (err) {
     req.log.error({ err }, "Error getting script");
@@ -149,26 +191,90 @@ router.put("/scripts/:id", requireAuth, async (req, res) => {
     if (typeof body.subject === "string" || body.subject === null) updates.subject = body.subject ?? null;
     if (typeof body.filename === "string" && body.filename.trim()) updates.filename = body.filename.trim();
     if (typeof body.code === "string") updates.code = body.code;
-    if (body.departmentId === null || typeof body.departmentId === "number") updates.departmentId = body.departmentId;
-
-    if (Object.keys(updates).length === 1) {
-      return res.status(400).json({ error: "No fields to update" });
-    }
 
     // When code changes, clear cached AI schema so admin can re-enhance.
     if (typeof body.code === "string" && body.code !== existing.code) {
       updates.aiSchema = null;
     }
 
-    const [updated] = await db.update(scriptsTable).set(updates).where(eq(scriptsTable.id, id)).returning();
+    const deptIds = coerceDepartmentIds(body);
+
+    const hasFieldUpdates = Object.keys(updates).length > 1;
+    if (!hasFieldUpdates && deptIds === undefined) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    if (hasFieldUpdates) {
+      await db.update(scriptsTable).set(updates).where(eq(scriptsTable.id, id));
+    }
+    if (deptIds !== undefined) {
+      // Validate referenced department ids exist.
+      let validIds: number[] = [];
+      if (deptIds.length > 0) {
+        const existingDepts = await db.select({ id: departmentsTable.id })
+          .from(departmentsTable).where(inArray(departmentsTable.id, deptIds));
+        validIds = existingDepts.map(d => d.id);
+      }
+      await setScriptDepartments(id, validIds);
+    }
+
+    const updated = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    const departments = (await getScriptDepartments([id])).get(id) ?? [];
+    const changedFields = Object.keys(updates).filter(k => k !== "updatedAt");
+    if (deptIds !== undefined) changedFields.push("departments");
     await logAudit({
       req, userId, userEmail: me.email,
       action: "script.update", resourceType: "script", resourceId: id,
-      details: { changedFields: Object.keys(updates).filter(k => k !== "updatedAt") },
+      details: { changedFields },
     });
-    res.json(mapScript(updated));
+    res.json(mapScript(updated!, departments));
   } catch (err) {
     req.log.error({ err }, "Error updating script");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * Replace the set of departments assigned to a script.
+ * Body: { departmentIds: number[] } – empty array means "Global".
+ */
+router.put("/scripts/:id/departments", requireAuth, async (req, res) => {
+  const userId = (req as any).userId as string;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
+    if (!me) return res.status(401).json({ error: "User not found" });
+    if (me.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+    const existing = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    const deptIds = coerceDepartmentIds(req.body);
+    if (deptIds === undefined) {
+      return res.status(400).json({ error: "departmentIds[] required" });
+    }
+
+    let validIds: number[] = [];
+    if (deptIds.length > 0) {
+      const existingDepts = await db.select({ id: departmentsTable.id })
+        .from(departmentsTable).where(inArray(departmentsTable.id, deptIds));
+      validIds = existingDepts.map(d => d.id);
+    }
+    await setScriptDepartments(id, validIds);
+
+    const previousIds = await getScriptDepartmentIds(id);
+    await logAudit({
+      req, userId, userEmail: me.email,
+      action: "script.assign_departments", resourceType: "script", resourceId: id,
+      details: { previous: previousIds, next: validIds },
+    });
+
+    const departments = (await getScriptDepartments([id])).get(id) ?? [];
+    res.json({ id, departments, departmentIds: departments.map(d => d.id) });
+  } catch (err) {
+    req.log.error({ err }, "Error updating script departments");
     res.status(500).json({ error: "Internal server error" });
   }
 });

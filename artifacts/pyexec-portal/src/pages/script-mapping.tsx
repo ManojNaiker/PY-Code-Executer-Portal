@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
   Play, Download, FolderDown, FileCode2, Search, Plus, Pencil, Trash2,
-  FolderPlus, Folder, ChevronRight, ChevronDown,
+  FolderPlus, Folder, ChevronRight, ChevronDown, Building2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -15,6 +15,7 @@ import { RunScriptDialog } from "@/components/run-script-dialog";
 import { PageHeader } from "@/components/page-header";
 import { FolderDialog, type FolderRecord } from "@/components/folder-dialog";
 import { AssignScriptsDialog } from "@/components/assign-scripts-dialog";
+import { AssignDepartmentsDialog } from "@/components/assign-departments-dialog";
 import { getColor, getIcon } from "@/lib/folder-icons";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -58,6 +59,7 @@ export default function ScriptMapping() {
 
   // Assign scripts dialog
   const [assignFolder, setAssignFolder] = useState<FolderApi | null>(null);
+  const [assignDeptScript, setAssignDeptScript] = useState<{ id: number; name: string; departmentIds: number[] } | null>(null);
 
   // Delete confirm
   const [deleteFolder, setDeleteFolder] = useState<FolderApi | null>(null);
@@ -285,9 +287,34 @@ export default function ScriptMapping() {
                             <div className="text-sm font-medium truncate" title={script.name}>{script.name}</div>
                             <div className="font-mono text-xs text-muted-foreground truncate">{script.filename}</div>
                           </div>
-                          <Badge variant="outline" className="shrink-0 text-xs hidden sm:inline-flex">
-                            {script.departmentName || "Global"}
-                          </Badge>
+                          {(() => {
+                            const depts: Array<{ id: number; name: string }> =
+                              (script as any).departments
+                              ?? (script.departmentName ? [{ id: script.departmentId, name: script.departmentName }] : []);
+                            if (depts.length === 0) {
+                              return (
+                                <Badge variant="outline" className="shrink-0 text-xs hidden sm:inline-flex">
+                                  Global
+                                </Badge>
+                              );
+                            }
+                            const visible = depts.slice(0, 2);
+                            const extra = depts.length - visible.length;
+                            return (
+                              <div className="hidden sm:flex items-center gap-1 shrink-0 max-w-[260px] overflow-hidden">
+                                {visible.map(d => (
+                                  <Badge key={d.id} variant="outline" className="text-xs truncate" title={d.name}>
+                                    {d.name}
+                                  </Badge>
+                                ))}
+                                {extra > 0 && (
+                                  <Badge variant="secondary" className="text-xs" title={depts.map(d => d.name).join(", ")}>
+                                    +{extra}
+                                  </Badge>
+                                )}
+                              </div>
+                            );
+                          })()}
                           <div className="flex gap-1 shrink-0">
                             <Button
                               size="sm"
@@ -322,6 +349,21 @@ export default function ScriptMapping() {
                                 </Button>
                               );
                             })()}
+                            {isAdmin && (
+                              <Button
+                                variant="outline" size="sm" className="h-8 w-8 p-0"
+                                title="Assign to departments"
+                                onClick={() => setAssignDeptScript({
+                                  id: script.id,
+                                  name: script.name,
+                                  departmentIds: (script as any).departmentIds
+                                    ?? ((script as any).departments?.map((d: any) => d.id))
+                                    ?? (script.departmentId ? [script.departmentId] : []),
+                                })}
+                              >
+                                <Building2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             {isAdmin && (
                               <Button
                                 variant="outline" size="sm" asChild title="Manage / details" className="h-8 w-8 p-0"
@@ -368,6 +410,17 @@ export default function ScriptMapping() {
           folderName={assignFolder.name}
           scripts={(scripts ?? []) as any}
           onSaved={async () => { await refreshFolders(); queryClient.invalidateQueries({ queryKey: getListScriptsQueryKey() }); }}
+        />
+      )}
+
+      {assignDeptScript && (
+        <AssignDepartmentsDialog
+          open={!!assignDeptScript}
+          onOpenChange={(o) => { if (!o) setAssignDeptScript(null); }}
+          scriptId={assignDeptScript.id}
+          scriptName={assignDeptScript.name}
+          initialDepartmentIds={assignDeptScript.departmentIds}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: getListScriptsQueryKey() })}
         />
       )}
 

@@ -9,6 +9,7 @@ import { scriptsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 import { requireAuth } from "../middlewares/requireAuth";
+import { userCanAccessScript } from "../lib/scriptAccess";
 import { logAudit } from "../lib/auditLogger";
 import { buildExe } from "../lib/exeBuilder";
 
@@ -57,7 +58,7 @@ async function loadScriptOrDeny(req: any, res: any, requireAdmin: boolean) {
     res.status(404).json({ error: "Not found" });
     return null;
   }
-  if (me.role !== "admin" && script.departmentId !== null && script.departmentId !== me.departmentId) {
+  if (!(await userCanAccessScript({ role: me.role, departmentId: me.departmentId }, script.id))) {
     res.status(403).json({ error: "Access denied" });
     return null;
   }
