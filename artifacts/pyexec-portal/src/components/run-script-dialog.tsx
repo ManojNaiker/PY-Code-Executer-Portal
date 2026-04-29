@@ -120,7 +120,7 @@ type ExecResult = {
 // Detects "soft" errors — script exited with code 0 but the output clearly
 // indicates a logical failure (validation error, caught exception, etc.).
 // Many GUI scripts catch their own errors and exit cleanly, which would
-// otherwise hide the failure from JARVIS Auto-Fix.
+// otherwise hide the failure from Light AI Auto-Fix.
 function hasSoftError(r: ExecResult | null): boolean {
   if (!r) return false;
   const text = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
@@ -211,7 +211,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   const [showAiDetails, setShowAiDetails] = useState(false);
   const [aiFixLoading, setAiFixLoading] = useState(false);
   const [aiFixApplying, setAiFixApplying] = useState(false);
-  // JARVIS Auto-Fix is ON by default for admins (Replit/Grok-style auto error resolver).
+  // Light AI Auto-Fix is ON by default for admins (Replit/Grok-style auto error resolver).
   // Non-admins can't write to scripts.code so it stays off for them.
   const [aiFixAutoMode, setAiFixAutoMode] = useState(true);
   const [aiFixProposal, setAiFixProposal] = useState<AiFixProposal | null>(null);
@@ -677,7 +677,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     setAiFixOriginal(null);
     setAiFixLoading(true);
     try {
-      // Step 1 — JARVIS analyses the latest error and proposes a fix
+      // Step 1 — Light AI analyses the latest error and proposes a fix
       const r = await fetch(`/api/scripts/${scriptId}/ai-fix-error`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -722,7 +722,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
       setAiFixApplied(true);
     } catch (e: any) {
       const msg = e?.message || String(e);
-      toast({ title: "JARVIS fix failed", description: msg, variant: "destructive" });
+      toast({ title: "Light AI fix failed", description: msg, variant: "destructive" });
       // Record the error as a terminal entry in the timeline
       setAiFixHistory((prev) => {
         const last = prev[prev.length - 1];
@@ -750,8 +750,8 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
   }, [aiFixAutoMode, aiFixApplied, aiFixLoading]);
 
   // Auto-fix loop: when a run completes with a failure and auto-mode is on,
-  // mark the latest history entry's outcome and chain another JARVIS attempt
-  // (up to MAX_AUTO_FIX_ATTEMPTS). This makes JARVIS behave like Replit/Grok —
+  // mark the latest history entry's outcome and chain another Light AI attempt
+  // (up to MAX_AUTO_FIX_ATTEMPTS). This makes Light AI behave like Replit/Grok —
   // it keeps reading the error, fixing the code, and re-running until smooth.
   useEffect(() => {
     if (!result) return;
@@ -782,7 +782,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
     if (aiFixHandledForRef.current === resultKey) return;
     aiFixHandledForRef.current = resultKey;
 
-    // Small delay so the UI can paint the failed result before JARVIS jumps in.
+    // Small delay so the UI can paint the failed result before Light AI jumps in.
     const t = setTimeout(() => { fixAndRerun(); }, 500);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -849,7 +849,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             <div className="rounded-md border border-purple-500/30 bg-purple-500/5 p-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Sparkles className="h-3.5 w-3.5 text-purple-500 shrink-0" />
               <span>
-                JARVIS has verified this form.{" "}
+                Light AI has verified this form.{" "}
                 {aiSchema.reconciledFields && aiSchema.reconciledFields.length > 0
                   ? `${aiSchema.reconciledFields.filter((f) => f.source === "ai_added").length > 0
                       ? `${aiSchema.reconciledFields.filter((f) => f.source === "ai_added").length} field(s) added, `
@@ -867,7 +867,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                 >
                   <Wand2 className="h-3.5 w-3.5 shrink-0" />
                   <span className="text-left flex-1">
-                    Script enhanced by JARVIS — {aiSchema.codeChanges.length} improvement{aiSchema.codeChanges.length === 1 ? "" : "s"}
+                    Script enhanced by Light AI — {aiSchema.codeChanges.length} improvement{aiSchema.codeChanges.length === 1 ? "" : "s"}
                   </span>
                   <span className="text-[11px] font-medium underline-offset-2 hover:underline">
                     {showAiDetails ? "Hide" : "View"}
@@ -999,7 +999,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                   Form Fields
                   {aiSchema?.reconciledFields && (
                     <Badge variant="outline" className="text-[10px] gap-1 normal-case font-normal border-purple-500/40 text-purple-600 dark:text-purple-400">
-                      <Sparkles className="h-2.5 w-2.5" /> JARVIS verified
+                      <Sparkles className="h-2.5 w-2.5" /> Light AI verified
                     </Badge>
                   )}
                 </div>
@@ -1016,7 +1016,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                       <Badge variant="outline" className="text-[10px]">{f.kind}</Badge>
                       {isAiAdded && (
                         <Badge className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
-                          <Wand2 className="h-2.5 w-2.5" /> Added by JARVIS
+                          <Wand2 className="h-2.5 w-2.5" /> Added by Light AI
                         </Badge>
                       )}
                       {!isAiAdded && hint && <Sparkles className="h-3 w-3 text-purple-500" />}
@@ -1503,12 +1503,12 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
             )}
             {(aiFixHistory.length > 0 || (effectivelyFailed && (aiFixAutoMode || aiFixLoading))) && (
               <div className="border border-purple-500/30 bg-purple-500/5 rounded-md p-3 space-y-3">
-                {/* Header — always shows JARVIS Auto-Fix status + toggle */}
+                {/* Header — always shows Light AI Auto-Fix status + toggle */}
                 <div className="flex items-start gap-2">
                   <Wand2 className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold">JARVIS Auto-Fix</span>
+                      <span className="text-sm font-semibold">Light AI Auto-Fix</span>
                       <Badge
                         variant={aiFixAutoMode ? "default" : "outline"}
                         className="text-[10px]"
@@ -1522,7 +1522,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      JARVIS reads errors, patches the code, and re-runs automatically — up to {MAX_AUTO_FIX_ATTEMPTS} attempts.
+                      Light AI reads errors, patches the code, and re-runs automatically — up to {MAX_AUTO_FIX_ATTEMPTS} attempts.
                     </p>
                   </div>
                   {!aiFixLoading && (
@@ -1537,17 +1537,17 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                   )}
                 </div>
 
-                {/* Live status while JARVIS is working */}
+                {/* Live status while Light AI is working */}
                 {aiFixLoading && (
                   <div className="flex items-center gap-2 text-sm text-purple-600 dark:text-purple-400 border-t border-purple-500/20 pt-2">
                     <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                     <span>
-                      JARVIS is analyzing the error and patching the code… (attempt {aiFixAttempt} of {MAX_AUTO_FIX_ATTEMPTS})
+                      Light AI is analyzing the error and patching the code… (attempt {aiFixAttempt} of {MAX_AUTO_FIX_ATTEMPTS})
                     </span>
                   </div>
                 )}
 
-                {/* Attempt timeline — every fix JARVIS tried, with diagnosis and outcome */}
+                {/* Attempt timeline — every fix Light AI tried, with diagnosis and outcome */}
                 {aiFixHistory.length > 0 && (
                   <div className="space-y-2 border-t border-purple-500/20 pt-2">
                     <div className="text-[11px] uppercase tracking-wide font-semibold text-purple-600/80 dark:text-purple-400/80">
@@ -1557,7 +1557,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                       const outcomeBadge =
                         h.outcome === "fixed" ? { label: "Fixed", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" } :
                         h.outcome === "still_failing" ? { label: "Still failing", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30" } :
-                        h.outcome === "error" ? { label: "JARVIS error", cls: "bg-destructive/15 text-destructive border-destructive/30" } :
+                        h.outcome === "error" ? { label: "Light AI error", cls: "bg-destructive/15 text-destructive border-destructive/30" } :
                         { label: "Re-running…", cls: "bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30" };
                       return (
                         <div key={h.attempt} className="rounded border border-purple-500/20 bg-background/40 p-2 space-y-1">
@@ -1575,7 +1575,7 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                             {h.provider && <Badge variant="outline" className="text-[10px]">{h.provider}</Badge>}
                           </div>
                           {h.outcome === "error" ? (
-                            <p className="text-xs text-destructive">{h.error || "JARVIS could not produce a fix."}</p>
+                            <p className="text-xs text-destructive">{h.error || "Light AI could not produce a fix."}</p>
                           ) : (
                             <>
                               <p className="text-xs text-foreground/80">{h.diagnosis}</p>
@@ -1595,12 +1595,12 @@ export function RunScriptDialog({ scriptId, scriptName, open, onOpenChange, init
                   </div>
                 )}
 
-                {/* Final state — JARVIS gave up after exhausting attempts */}
+                {/* Final state — Light AI gave up after exhausting attempts */}
                 {!aiFixLoading && effectivelyFailed && (aiFixGaveUp || aiFixAttempt >= MAX_AUTO_FIX_ATTEMPTS) && (
                   <div className="flex items-start gap-2 border-t border-purple-500/20 pt-2">
                     <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                     <div className="flex-1 text-xs text-foreground/80">
-                      JARVIS could not fully resolve the error after {aiFixAttempt} attempt{aiFixAttempt === 1 ? "" : "s"}.
+                      Light AI could not fully resolve the error after {aiFixAttempt} attempt{aiFixAttempt === 1 ? "" : "s"}.
                       You can review the timeline above, manually open the latest fix, or try again.
                       <div className="flex items-center gap-2 mt-2">
                         <Button size="sm" variant="outline" onClick={requestAiFix} disabled={aiFixLoading}>

@@ -72,7 +72,7 @@ export default function ScriptsList() {
       if (removedCount > 0) parts.push(`${removedCount} field(s) removed`);
       if (data.codeEnhanced) parts.push("script code improved");
       toast({
-        title: "JARVIS analysis complete",
+        title: "Light AI analysis complete",
         description: parts.join(" · ") || "Form verified and updated.",
       });
     } catch (e: any) {

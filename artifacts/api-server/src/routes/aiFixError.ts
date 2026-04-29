@@ -71,8 +71,8 @@ router.post("/scripts/:id/ai-fix-error", requireAuth, async (req, res) => {
   try {
     const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
     if (!me) return res.status(401).json({ error: "User not found" });
-    // JARVIS Auto-Fix is a universal feature — anyone authenticated who can
-    // run the script can ask JARVIS to analyse the failure. Apply step below
+    // Light AI Auto-Fix is a universal feature — anyone authenticated who can
+    // run the script can ask Light AI to analyse the failure. Apply step below
     // also accepts non-admins so the auto-fix loop completes end-to-end.
 
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });
@@ -172,7 +172,7 @@ router.post("/scripts/:id/ai-fix-error/apply", requireAuth, async (req, res) => 
   try {
     const me = await db.query.usersTable.findFirst({ where: eq(usersTable.clerkId, userId) });
     if (!me) return res.status(401).json({ error: "User not found" });
-    // JARVIS Auto-Fix applies to any authenticated user. The audit trail
+    // Light AI Auto-Fix applies to any authenticated user. The audit trail
     // records who applied the fix.
 
     const script = await db.query.scriptsTable.findFirst({ where: eq(scriptsTable.id, id) });

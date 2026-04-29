@@ -141,7 +141,7 @@ export default function Upload() {
     }
 
     if (!hasSupportedExtension(file.name)) {
-      setFileError("Unsupported file type. Upload a script JARVIS knows (.py, .sh, .js, .ts, .ps1, .bat, .vbs, .bas, .html, .sql, .rb, .pl, .php …).");
+      setFileError("Unsupported file type. Upload a script Light AI knows (.py, .sh, .js, .ts, .ps1, .bat, .vbs, .bas, .html, .sql, .rb, .pl, .php …).");
       setFileContent("");
       setFilename("");
       e.target.value = "";
@@ -172,7 +172,7 @@ export default function Upload() {
         setFileContent(py);
         toast({
           title: "Notebook converted",
-          description: "The .ipynb was flattened into a Python script so it can run on the server and be fixed by JARVIS.",
+          description: "The .ipynb was flattened into a Python script so it can run on the server and be fixed by Light AI.",
         });
       } else {
         setFileContent(result);
@@ -206,7 +206,7 @@ export default function Upload() {
     <div>
       <PageHeader
         title="Upload Script"
-        description="Deploy a new script to the portal. JARVIS auto-fixes any supported language."
+        description="Deploy a new script to the portal. Light AI auto-fixes any supported language."
         icon={<UploadIcon className="h-5 w-5" />}
       />
       <div className="max-w-3xl">

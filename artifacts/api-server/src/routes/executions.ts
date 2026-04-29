@@ -59,7 +59,7 @@ function unrunnableResult(lang: ScriptLanguage, executionTimeMs = 0): {
   return {
     success: false,
     stdout: "",
-    stderr: `[runtime] ${lang.displayName} cannot be executed on this server.\n${lang.unrunnableReason ?? "No interpreter available."}\n\nJARVIS can still review and fix the file — open the AI Fix or AI Enhance panel.`,
+    stderr: `[runtime] ${lang.displayName} cannot be executed on this server.\n${lang.unrunnableReason ?? "No interpreter available."}\n\nLight AI can still review and fix the file — open the AI Fix or AI Enhance panel.`,
     exitCode: -1,
     executionTimeMs,
     deps: { installed: [], failed: [], skipped: [] },
@@ -328,7 +328,7 @@ router.post("/scripts/:id/execute-stream", requireAuth, uploadAny, async (req, r
   send({ type: "status", message: `Detected language: ${lang.displayName}` });
 
   if (!lang.runnable || !lang.interpreter) {
-    const stderrMsg = `[runtime] ${lang.displayName} cannot be executed on this server.\n${lang.unrunnableReason ?? "No interpreter available."}\n\nJARVIS can still review and fix the file — open the AI Fix or AI Enhance panel.`;
+    const stderrMsg = `[runtime] ${lang.displayName} cannot be executed on this server.\n${lang.unrunnableReason ?? "No interpreter available."}\n\nLight AI can still review and fix the file — open the AI Fix or AI Enhance panel.`;
     send({ type: "stderr", data: stderrMsg + "\n" });
     let executionId: number | null = null;
     try {

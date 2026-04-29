@@ -89,7 +89,7 @@ export type AiEnhancedSchema = {
   generatedAt: string;
 };
 
-const SYSTEM_PROMPT = `You are JARVIS — an expert Python code analyst and engineer embedded inside PyExec Portal, an enterprise Python execution platform.
+const SYSTEM_PROMPT = `You are Light AI — an expert Python code analyst and engineer embedded inside PyExec Portal, an enterprise Python execution platform.
 
 Your job when called with a Python script:
 
@@ -176,7 +176,7 @@ Critical rules:
 - enhancedCode must be COMPLETE runnable Python — never truncate it
 - If you cannot improve the code meaningfully, still return it unchanged in enhancedCode`;
 
-const GENERIC_SYSTEM_PROMPT = (langName: string, fenceTag: string, runnable: boolean, unrunnableReason: string | undefined) => `You are JARVIS — an expert ${langName} engineer embedded inside PyExec Portal, an enterprise script execution platform.
+const GENERIC_SYSTEM_PROMPT = (langName: string, fenceTag: string, runnable: boolean, unrunnableReason: string | undefined) => `You are Light AI — an expert ${langName} engineer embedded inside PyExec Portal, an enterprise script execution platform.
 
 Your job when called with a ${langName} file is to make it more robust, production-ready, and informative.
 

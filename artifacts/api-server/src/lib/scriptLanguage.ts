@@ -80,7 +80,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: ["-NoProfile", "-NonInteractive", "-File"],
     runnable: true,
     unrunnableReason:
-      "PowerShell Core (pwsh) may not be installed in this environment. JARVIS can still review and fix the script.",
+      "PowerShell Core (pwsh) may not be installed in this environment. Light AI can still review and fix the script.",
     filePrefix: "script",
     fileExt: ".ps1",
     comment: "#",
@@ -93,7 +93,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: [],
     runnable: false,
     unrunnableReason:
-      "Windows .bat / .cmd files require cmd.exe and cannot run on this Linux server. JARVIS can still analyze, fix and enhance the script — copy the result and run it on a Windows machine.",
+      "Windows .bat / .cmd files require cmd.exe and cannot run on this Linux server. Light AI can still analyze, fix and enhance the script — copy the result and run it on a Windows machine.",
     filePrefix: "script",
     fileExt: ".bat",
     comment: "REM",
@@ -106,7 +106,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: [],
     runnable: false,
     unrunnableReason:
-      "VBScript needs Windows Script Host (cscript.exe) and cannot run on this Linux server. JARVIS can still analyze, fix and enhance the script.",
+      "VBScript needs Windows Script Host (cscript.exe) and cannot run on this Linux server. Light AI can still analyze, fix and enhance the script.",
     filePrefix: "script",
     fileExt: ".vbs",
     comment: "'",
@@ -119,7 +119,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: [],
     runnable: false,
     unrunnableReason:
-      "VBA / Office macros only run inside Microsoft Office (Excel, Word, Access). JARVIS can still analyze, fix and enhance the macro — paste the result into the VBA editor.",
+      "VBA / Office macros only run inside Microsoft Office (Excel, Word, Access). Light AI can still analyze, fix and enhance the macro — paste the result into the VBA editor.",
     filePrefix: "macro",
     fileExt: ".bas",
     comment: "'",
@@ -132,7 +132,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: [],
     runnable: false,
     unrunnableReason:
-      "HTML files are rendered in a browser, not executed on the server. JARVIS can still validate, fix and enhance the markup, JavaScript and CSS inside the file.",
+      "HTML files are rendered in a browser, not executed on the server. Light AI can still validate, fix and enhance the markup, JavaScript and CSS inside the file.",
     filePrefix: "page",
     fileExt: ".html",
     comment: "<!--",
@@ -145,7 +145,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: [],
     runnable: false,
     unrunnableReason:
-      "SQL needs a target database connection to execute. JARVIS can still review the query for syntax, performance and safety issues.",
+      "SQL needs a target database connection to execute. Light AI can still review the query for syntax, performance and safety issues.",
     filePrefix: "query",
     fileExt: ".sql",
     comment: "--",
@@ -191,7 +191,7 @@ const LANGS: Record<ScriptLanguageId, ScriptLanguage> = {
     interpreterArgs: [],
     runnable: false,
     unrunnableReason:
-      "JARVIS could not determine the language of this file. Rename the file with a recognised extension (.py, .sh, .ps1, .bat, .vbs, .html, .js, .sql, …) so it can be analysed correctly.",
+      "Light AI could not determine the language of this file. Rename the file with a recognised extension (.py, .sh, .ps1, .bat, .vbs, .html, .js, .sql, …) so it can be analysed correctly.",
     filePrefix: "file",
     fileExt: ".txt",
     comment: "#",
